@@ -128,6 +128,7 @@ class Session(BaseModel):
     outline: Optional[dict[str, Any]] = None
     messages: list[dict[str, Any]] = []
     style_refs: list[dict[str, Any]] = []
+    answer_rounds: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -670,24 +671,28 @@ async def submit_answer(request: AnswerRequest):
 
     for key, value in request.answers.items():
         session.answers[key] = value if isinstance(value, str) else ", ".join(value) if isinstance(value, list) else str(value)
+    session.answer_rounds += 1
     update_session(session)
 
     doc_type = session.doc_type or "Documento Jurídico"
     answers_text = "\n".join(f"- {k}: {v}" for k, v in session.answers.items())
+    is_final_round = session.answer_rounds >= 2
 
     # Provide document store context if available
     docs_context = ""
     if document_store:
         docs_context = f"\n\nVocê tem acesso a {len(document_store)} documentos de referência do escritório para usar como base de estilo e argumentação."
 
+    force_outline = "IMPORTANTE: Esta é a SEGUNDA rodada de perguntas. Você DEVE gerar o roteiro (OPÇÃO 2) agora com as informações disponíveis. Use [placeholders] para dados faltantes. NÃO faça mais perguntas.\n\n" if is_final_round else ""
+
     system_prompt = f"""Você é um assistente jurídico especializado. O usuário está elaborando: {doc_type}.
 Informações já coletadas:
 {answers_text}
 {docs_context}
 
-Analise as informações. Você tem DUAS opções:
+{force_outline}Analise as informações. Você tem DUAS opções:
 
-OPÇÃO 1 - Se FALTAM informações ESSENCIAIS (fatos, tese, pedidos), gere perguntas de refinamento.
+OPÇÃO 1 - Se FALTAM informações ESSENCIAIS (fatos, tese, pedidos) E esta é a PRIMEIRA rodada, gere perguntas de refinamento.
 Responda com JSON:
 {{"action": "more_questions", "thinking_summary": "por que precisa de mais info", "questions": [...]}}
 
