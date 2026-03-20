@@ -1,15 +1,20 @@
 # Dependencies
 node_modules/
 __pycache__/
+*.py[codz]
 *.pyc
 venv/
+.venv/
 
 # Build
 frontend/dist/
+build/
+dist/
 
 # Environment
 backend/.env
 .env
+.envrc
 
 # IDE
 .vscode/
