@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - CLAUDE_AUTH_MODE=cli
+    volumes:
+      # Mount Claude credentials from host (needed for CLI auth)
+      - ${HOME}/.claude:/root/.claude:ro
+      - ${HOME}/.local/share/claude-code:/root/.local/share/claude-code:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Empty = uses relative /api/ path (proxied by nginx)
+        VITE_API_BASE: ""
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
