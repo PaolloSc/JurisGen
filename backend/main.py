@@ -597,25 +597,38 @@ async def set_document_type(request: SetTypeRequest):
     context = getattr(request, "context", "") or request.doc_type
     update_session(session)
 
-    system_prompt = """Você é um assistente jurídico especializado em elaborar documentos jurídicos brasileiros.
-O usuário quer elaborar um documento do tipo informado. Sua tarefa é gerar perguntas ADAPTATIVAS e INTELIGENTES
-para coletar as informações necessárias para redigir esse documento.
+    system_prompt = """Você é um advogado sênior com 20 anos de experiência em contencioso cível, trabalhista e consumerista brasileiro.
+O usuário quer elaborar um documento jurídico. Sua tarefa é gerar perguntas DETALHADAS, TÉCNICAS e ESTRATÉGICAS
+para coletar TODAS as informações necessárias para redigir uma peça processual de alta qualidade.
+
+VOCÊ DEVE PERGUNTAR COMO UM ADVOGADO PERGUNTARIA AO CLIENTE NA PRIMEIRA CONSULTA:
+
+CATEGORIAS OBRIGATÓRIAS DE PERGUNTAS:
+1. **Contrapartes e Qualificação** - Nome completo, CPF/CNPJ, endereço, qualificação completa de TODAS as partes
+2. **Fatos e Cronologia** - O que aconteceu, quando, onde, como, com quem. Datas específicas, valores, documentos existentes
+3. **Provas e Documentos** - Quais provas o cliente tem (contratos, e-mails, fotos, testemunhas, prints, recibos)
+4. **Pretensão e Valores** - O que exatamente o cliente quer: indenização (moral/material), obrigação de fazer/não fazer, valores específicos
+5. **Urgência e Tutela** - Se há necessidade de liminar ou tutela de urgência, risco de dano irreparável
+6. **Competência e Jurisdição** - Foro competente, comarca, se há cláusula de foro, valor da causa estimado
+7. **Tentativas Anteriores** - Se já tentou resolver administrativamente, se há processo anterior, se houve mediação
 
 REGRAS:
-- Gere entre 3 e 8 perguntas relevantes para o tipo de documento
-- As perguntas devem ser específicas ao contexto (não genéricas)
-- Use tipos variados: "choice" (com opções), "multiple" (múltipla escolha), "text" (resposta livre)
-- Para "choice" e "multiple", inclua opções relevantes e sempre uma opção "Outro"
-- Opções devem ter campos: id (string curta), label (texto visível), desc (descrição opcional)
+- Gere entre 8 e 15 perguntas (peças complexas exigem mais informações)
+- Perguntas devem ser ESPECÍFICAS ao tipo de documento, não genéricas
+- Use tipos variados: "choice" (com opções detalhadas), "multiple" (múltipla escolha), "text" (resposta livre detalhada)
+- Para "choice" e "multiple", opções devem ser juridicamente precisas com descrições explicando consequências
+- Opções devem ter campos: id (string curta), label (texto visível), desc (explicação jurídica da opção)
 - Cada pergunta deve ter: id (q1, q2...), text, type, options (se choice/multiple)
-- Pense no que um advogado experiente perguntaria ao cliente
+- Perguntas de texto livre devem pedir detalhes específicos (ex: "Descreva cronologicamente os fatos, incluindo datas, valores e nomes envolvidos")
+- Inclua pelo menos 2 perguntas sobre provas disponíveis
+- Inclua pelo menos 1 pergunta sobre valores/quantum pretendido
 
 Responda APENAS com JSON válido neste formato:
 {
-  "thinking_summary": "breve resumo do raciocínio",
+  "thinking_summary": "breve resumo da estratégia jurídica e por que essas perguntas são necessárias",
   "questions": [
-    {"id": "q1", "text": "pergunta", "type": "choice", "options": [{"id": "opt1", "label": "Opção 1", "desc": "descrição"}, {"id": "other", "label": "Outro"}]},
-    {"id": "q2", "text": "pergunta livre", "type": "text"}
+    {"id": "q1", "text": "pergunta detalhada", "type": "choice", "options": [{"id": "opt1", "label": "Opção 1", "desc": "explicação jurídica"}, {"id": "other", "label": "Outro (especifique)"}]},
+    {"id": "q2", "text": "pergunta livre detalhada pedindo informações específicas", "type": "text"}
   ]
 }"""
 
@@ -764,65 +777,78 @@ async def regenerate_outline(session_id: str):
 
 
 @app.post("/api/pipeline/generate-document/{session_id}")
-async def generate_document(session_id: str, background_tasks: BackgroundTasks):
-    """
-    Generate the final document (streaming)
-    TODO: Implement AI document generation with streaming
-    """
+async def generate_document(session_id: str):
+    """Generate the final document section by section using AI, streamed as NDJSON."""
+    from fastapi.responses import StreamingResponse
+    import json as _json
+
     session = get_session(session_id)
-    
-    # Extract variables to avoid complex expressions in f-string
-    cliente = session.answers.get("cliente", "__NOME DO CLIENTE__")
-    tipo_pessoa = session.answers.get("tipo_pessoa", "pessoa física")
-    doc_cliente = session.answers.get("documento", "__DOCUMENTO__")
-    reu = session.answers.get("reu", "__NOME DO RÉU__")
-    reu_tipo = session.answers.get("reu_tipo_pessoa", "pessoa física")
-    reu_doc = session.answers.get("reu_documento", "__DOCUMENTO__")
-    vara = session.answers.get("vara", "__VARA__")
-    artigo = session.answers.get("artigo", "300")
-    fatos = session.answers.get("fatos", "__Descreva os fatos...__")
-    fundamentacao = session.answers.get("fundamentacao", "__Descreva a fundamentação jurídica...__")
-    pedidos = session.answers.get("pedidos", "__Liste os pedidos...__")
-    cidade = session.answers.get("cidade", "__CIDADE__")
-    doc_type_label = session.doc_type or "AÇÃO"
-    tipo_doc_cliente = "CNPJ" if tipo_pessoa.lower() == "pessoa jurídica" else "CPF"
-    tipo_doc_reu = "CNPJ" if reu_tipo.lower() == "pessoa jurídica" else "CPF"
+    doc_type = session.doc_type or "Documento Jurídico"
+    answers_text = "\n".join(f"- {k}: {v}" for k, v in session.answers.items())
+    outline = session.outline or {}
+    sections = outline.get("sections", [])
 
-    sample_doc = f"""{doc_type_label}
+    # Build reference context from indexed documents
+    docs_context = ""
+    if document_store:
+        # Pick up to 3 most relevant docs by name similarity
+        previews = [f"[{d['name']}]: {d.get('preview', '')[:300]}" for d in document_store[:5]]
+        docs_context = f"\n\nDocumentos de referência do escritório para estilo e argumentação:\n" + "\n".join(previews)
 
-EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {vara} VARA CÍVEL DA COMARCA DE __COMARCA__
+    async def stream_sections():
+        for i, sec in enumerate(sections):
+            section_title = sec.get("title", f"Seção {i+1}")
+            section_desc = sec.get("description", "")
+            legal_basis = sec.get("legal_basis", [])
+            basis_text = ", ".join(legal_basis) if legal_basis else "conforme legislação aplicável"
 
-{cliente}, {tipo_doc_cliente}: {doc_cliente}, através de seu advogado e progenitor ao final firmado, vem respeitosamente à presença de Vossa Excelência com fundamento no artigo {artigo} do Código de Processo Civil propor
+            system_prompt = f"""Você é um advogado sênior redigindo uma peça jurídica real: {doc_type}.
+Escreva a seção "{section_title}" de forma COMPLETA, PROFISSIONAL e PRONTA PARA PROTOCOLAR.
 
-{doc_type_label}
+Informações do caso:
+{answers_text}
 
-em face de {reu}, {tipo_doc_reu}: {reu_doc}, pelos fatos e fundamentos a seguir expostos:
+Descrição da seção: {section_desc}
+Fundamentação legal sugerida: {basis_text}
+{docs_context}
 
-I - DOS FATOS
-{fatos}
+REGRAS DE REDAÇÃO:
+- Use linguagem jurídica formal brasileira (Excelentíssimo, Douto Juízo, etc.)
+- Cite artigos de lei, jurisprudência e doutrina quando relevante
+- Seja detalhista e completo — esta seção será usada diretamente na peça
+- Para endereçamento: use formato completo (EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA...)
+- Para qualificação: use todos os dados disponíveis
+- Para fatos: narrativa cronológica detalhada
+- Para direito: fundamentação robusta com citação de artigos
+- Para pedidos: lista enumerada e específica
+- NÃO use placeholders como [NOME] ou __DADO__ — use os dados reais fornecidos
+- Se algum dado estiver faltando, use "a ser informado" de forma natural
 
-II - DO DIREITO
-{fundamentacao}
+Escreva APENAS o conteúdo da seção, sem título (o título já será exibido separadamente)."""
 
-III - DOS PEDIDOS
-{pedidos}
+            try:
+                content = await llm.chat(
+                    system=system_prompt,
+                    user=f"Redija a seção '{section_title}' da peça {doc_type}.",
+                    max_tokens=3000,
+                )
+            except Exception as e:
+                content = f"[Erro ao gerar esta seção: {str(e)[:100]}]"
 
-Protesta provar o alegado por todos os meios de prova em direito admitidos.
+            event = {
+                "type": "section",
+                "data": {
+                    "section_title": section_title,
+                    "content": content,
+                    "legal_basis": legal_basis,
+                },
+            }
+            yield _json.dumps(event, ensure_ascii=False) + "\n"
 
-Termos em que,
-P. Deferimento.
+        # Final progress event
+        yield _json.dumps({"type": "done", "total_sections": len(sections)}, ensure_ascii=False) + "\n"
 
-{cidade}, {datetime.now().strftime("%d de %B de %Y")}
-
-_______________________
-OAB/UF
-Advogado"""
-
-    return {
-        "session_id": session.id,
-        "document": sample_doc,
-        "message": "Document generated successfully"
-    }
+    return StreamingResponse(stream_sections(), media_type="application/x-ndjson")
 
 
 # ─── Chat ───
