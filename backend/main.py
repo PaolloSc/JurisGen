@@ -244,18 +244,23 @@ def _normalize_questions(questions: list) -> list:
         else:
             q["type"] = "text"
         # Normalize options
-        if q["type"] in ("choice", "multiple") and "options" in q:
-            opts = []
-            for opt in q["options"]:
-                if isinstance(opt, str):
-                    opts.append({"id": opt.lower().replace(" ", "_")[:20], "label": opt})
-                elif isinstance(opt, dict):
-                    opt_id = opt.get("id") or opt.get("value") or opt.get("label", "opt")
-                    opt_label = opt.get("label") or opt.get("text") or opt.get("value") or str(opt_id)
-                    opts.append({"id": str(opt_id), "label": opt_label, "desc": opt.get("desc", opt.get("description", ""))})
-                else:
-                    opts.append({"id": str(opt), "label": str(opt)})
-            q["options"] = opts
+        if q["type"] in ("choice", "multiple"):
+            if "options" in q and isinstance(q["options"], list) and len(q["options"]) > 0:
+                opts = []
+                for opt in q["options"]:
+                    if isinstance(opt, str):
+                        opts.append({"id": opt.lower().replace(" ", "_")[:20], "label": opt})
+                    elif isinstance(opt, dict):
+                        opt_id = opt.get("id") or opt.get("value") or opt.get("label", "opt")
+                        opt_label = opt.get("label") or opt.get("text") or opt.get("value") or str(opt_id)
+                        opts.append({"id": str(opt_id), "label": opt_label, "desc": opt.get("desc", opt.get("description", ""))})
+                    else:
+                        opts.append({"id": str(opt), "label": str(opt)})
+                q["options"] = opts
+            else:
+                # choice/multiple without options -> convert to text
+                q["type"] = "text"
+                q.pop("options", None)
         normalized.append(q)
     return normalized
 
@@ -682,9 +687,19 @@ Informações já coletadas:
 
 Analise as informações. Você tem DUAS opções:
 
-OPÇÃO 1 - Se FALTAM informações críticas para elaborar o documento, gere mais perguntas adaptativas.
+OPÇÃO 1 - Se FALTAM informações ESSENCIAIS (fatos, tese, pedidos), gere perguntas de refinamento.
 Responda com JSON:
 {{"action": "more_questions", "thinking_summary": "por que precisa de mais info", "questions": [...]}}
+
+FORMATO OBRIGATÓRIO DAS PERGUNTAS DE REFINAMENTO:
+- Use MAJORITARIAMENTE tipo "choice" (opções clicáveis) — o usuário prefere CLICAR, não digitar
+- Cada pergunta "choice" DEVE ter campo "options" com array de opções: [{{"id": "x", "label": "texto", "desc": "explicação"}}]
+- SEMPRE inclua uma opção {{"id": "other", "label": "Outro (especifique)"}} em cada choice
+- Use "multiple" para perguntas com várias respostas possíveis (também com options obrigatório)
+- Use "text" (campo aberto) APENAS na ÚLTIMA pergunta, para observações adicionais
+- Máximo 5-6 perguntas de refinamento
+- Dados pessoais faltantes (CPF, RG, endereço) NÃO precisam ser perguntados — serão [placeholders]
+- Foque nas informações que mudam a ESTRATÉGIA JURÍDICA
 
 OPÇÃO 2 - Se já tem informações SUFICIENTES, gere um roteiro detalhado do documento.
 Responda com JSON:
@@ -698,7 +713,6 @@ Responda com JSON:
   ]
 }}}}
 
-As perguntas (se opção 1) devem ser específicas ao caso, NÃO genéricas. Use choice/multiple/text conforme adequado.
 O roteiro (se opção 2) deve ter seções detalhadas com fundamentação legal específica ao caso.
 Responda APENAS com JSON válido."""
 
