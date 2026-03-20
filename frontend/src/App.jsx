@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── Config ──────────────────────────────────────────────
-const API_BASE = import.meta.env.VITE_API_BASE !== undefined ? import.meta.env.VITE_API_BASE : "http://localhost:8002";
+const API_BASE = import.meta.env.VITE_API_BASE || "";
 const API_TIMEOUT_MS = 60000;
 
 async function api(path, options = {}, timeoutMs = API_TIMEOUT_MS) {
@@ -136,12 +136,15 @@ function QuestionFormInline({ questions, onSubmit }) {
     return r;
   };
 
-  const done = safeQuestions.length > 0 && safeQuestions.every(q => {
+  // At least 1 answer is enough — unanswered fields become placeholders in the document
+  const answeredCount = safeQuestions.filter(q => {
     const a = answers[q.id];
-    const questionType = getQuestionType(q);
-    if (questionType === "text") return typeof a === "string" && a.trim().length > 0;
-    return a && (!Array.isArray(a) || a.length > 0);
-  });
+    if (!a) return false;
+    if (typeof a === "string") return a.trim().length > 0;
+    if (Array.isArray(a)) return a.length > 0;
+    return true;
+  }).length;
+  const done = safeQuestions.length > 0 && answeredCount >= 1;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
@@ -192,7 +195,10 @@ function QuestionFormInline({ questions, onSubmit }) {
           </div>
         );
       })}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
+          {answeredCount}/{safeQuestions.length} respondidas — campos vazios virarão [placeholders]
+        </span>
         <button onClick={() => onSubmit(buildMap())} disabled={!done} style={{
           padding: "10px 22px", background: done ? "var(--accent)" : "rgba(255,255,255,0.05)", border: "none", borderRadius: 7, color: done ? "#fff" : "rgba(255,255,255,0.2)", fontWeight: 600, cursor: done ? "pointer" : "not-allowed", fontSize: 13,
         }}>Continuar →</button>
