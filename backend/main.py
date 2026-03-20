@@ -794,6 +794,7 @@ async def generate_document(session_id: str):
     """Generate the final document section by section using AI, streamed as NDJSON."""
     from fastapi.responses import StreamingResponse
     import json as _json
+    from legal_search import pesquisar_tudo, format_sources_for_prompt, format_sources_for_document
 
     session = get_session(session_id)
     doc_type = session.doc_type or "Documento Jurídico"
@@ -804,11 +805,31 @@ async def generate_document(session_id: str):
     # Build reference context from indexed documents
     docs_context = ""
     if document_store:
-        # Pick up to 3 most relevant docs by name similarity
         previews = [f"[{d['name']}]: {d.get('preview', '')[:300]}" for d in document_store[:5]]
-        docs_context = f"\n\nDocumentos de referência do escritório para estilo e argumentação:\n" + "\n".join(previews)
+        docs_context = f"\n\nDocumentos de referência do escritório:\n" + "\n".join(previews)
+
+    # Research: busca jurisprudência, doutrina e modelos ANTES de gerar
+    tema_pesquisa = f"{doc_type} {' '.join(list(session.answers.values())[:3])}"[:200]
+    try:
+        research = await pesquisar_tudo(tema_pesquisa, doc_type)
+        research_context = format_sources_for_prompt(research)
+        sources_block = format_sources_for_document(research)
+    except Exception:
+        research = {"all_sources": []}
+        research_context = ""
+        sources_block = ""
 
     async def stream_sections():
+        # First: emit research results so frontend can show them
+        if research["all_sources"]:
+            yield _json.dumps({
+                "type": "research",
+                "data": {
+                    "total": len(research["all_sources"]),
+                    "sources": research["all_sources"],
+                },
+            }, ensure_ascii=False) + "\n"
+
         for i, sec in enumerate(sections):
             section_title = sec.get("title", f"Seção {i+1}")
             section_desc = sec.get("description", "")
@@ -825,20 +846,22 @@ Descrição da seção: {section_desc}
 Fundamentação legal sugerida: {basis_text}
 {docs_context}
 
+{research_context}
+
 REGRAS DE REDAÇÃO:
-- Use linguagem jurídica formal brasileira (Excelentíssimo, Douto Juízo, etc.)
-- Cite artigos de lei, jurisprudência e doutrina quando relevante
+- Use linguagem jurídica formal brasileira
+- OBRIGATÓRIO: Cite jurisprudência REAL dos resultados de pesquisa acima (com número do processo, tribunal e data)
+- Ao citar jurisprudência, use o formato: (Tribunal, Processo nº X, Relator Min. Y, julgado em DD/MM/AAAA)
+- Ao citar doutrina, mencione autor e obra quando disponível nos resultados de pesquisa
+- Ao final de cada citação, inclua [Fonte N] referenciando o número da fonte da pesquisa
 - Seja detalhista e completo — esta seção será usada diretamente na peça
-- Para endereçamento: use formato completo (EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA...)
-- Para fatos: narrativa cronológica detalhada com base nas informações fornecidas
-- Para direito: fundamentação robusta com citação de artigos
+- Para fatos: narrativa cronológica detalhada
+- Para direito: fundamentação robusta com artigos de lei + jurisprudência real
 - Para pedidos: lista enumerada e específica
 - Use os dados reais fornecidos pelo usuário
-- Para dados NÃO informados, use placeholders entre colchetes para o advogado preencher depois:
-  [Nome Completo], [CPF], [RG], [CNPJ], [Endereço Completo], [CEP], [Comarca], [Vara], [OAB/UF], [Valor], etc.
-- O documento deve ficar PRONTO para o advogado revisar e preencher apenas os campos faltantes
+- Para dados NÃO informados, use placeholders: [Nome Completo], [CPF], [RG], [Endereço], etc.
 
-Escreva APENAS o conteúdo da seção, sem título (o título já será exibido separadamente)."""
+Escreva APENAS o conteúdo da seção, sem título."""
 
             try:
                 content = await llm.chat(
@@ -858,6 +881,18 @@ Escreva APENAS o conteúdo da seção, sem título (o título já será exibido 
                 },
             }
             yield _json.dumps(event, ensure_ascii=False) + "\n"
+
+        # Emit sources block as final section
+        if sources_block:
+            yield _json.dumps({
+                "type": "section",
+                "data": {
+                    "section_title": "FONTES CONSULTADAS",
+                    "content": sources_block,
+                    "legal_basis": [],
+                    "is_sources": True,
+                },
+            }, ensure_ascii=False) + "\n"
 
         # Final progress event
         yield _json.dumps({"type": "done", "total_sections": len(sections)}, ensure_ascii=False) + "\n"

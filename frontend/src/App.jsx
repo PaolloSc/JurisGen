@@ -827,15 +827,18 @@ export default function JurisGenApp() {
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line);
-            if (event.type === "section") {
+            if (event.type === "research") {
+              addMessage({
+                role: "assistant", type: "text",
+                content: `🔍 Pesquisa jurídica concluída: ${event.data.total} fontes encontradas (jurisprudência, doutrina e modelos). Gerando documento com referências verificáveis...`,
+              });
+            } else if (event.type === "section") {
               allSections.push(event.data);
               addMessage({
                 role: "assistant", type: "document_section",
                 thinking: event.thinking,
                 section: event.data,
               });
-            } else if (event.type === "progress") {
-              // Update loading indicator
             }
           } catch { }
         }
