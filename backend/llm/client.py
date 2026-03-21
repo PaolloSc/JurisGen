@@ -8,6 +8,97 @@ import httpx
 from openai import AsyncOpenAI
 
 
+# ─── HuggingFace Models Configuration ────────────────────────
+HF_JUREMA_MODEL = "Jurema-br/Jurema-7B"
+HF_LONGCAT_MODEL = "meituan-longcat/LongCat-Flash-Thinking"
+HF_INFERENCE_URL = "https://router.huggingface.co/v1"
+
+
+class HuggingFaceClient:
+    """Client for HuggingFace Inference API (OpenAI-compatible)."""
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.jurema = AsyncOpenAI(
+            base_url=HF_INFERENCE_URL,
+            api_key=api_key,
+        )
+        self.longcat = AsyncOpenAI(
+            base_url=HF_INFERENCE_URL,
+            api_key=api_key,
+        )
+
+    async def chat_jurema(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.3,
+        max_tokens: int = 2000,
+    ) -> str:
+        """Chat with Jurema 7B — specialized Brazilian legal model."""
+        try:
+            response = await self.jurema.chat.completions.create(
+                model=HF_JUREMA_MODEL,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            # Fallback: try direct inference API
+            return await self._direct_inference(HF_JUREMA_MODEL, system, user, max_tokens)
+
+    async def chat_longcat(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.2,
+        max_tokens: int = 2000,
+    ) -> str:
+        """Chat with LongCat Flash Thinking — formal reasoning model."""
+        try:
+            response = await self.longcat.chat.completions.create(
+                model=HF_LONGCAT_MODEL,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            return await self._direct_inference(HF_LONGCAT_MODEL, system, user, max_tokens)
+
+    async def _direct_inference(
+        self, model: str, system: str, user: str, max_tokens: int
+    ) -> str:
+        """Fallback: call HuggingFace Inference API directly (non-OpenAI format)."""
+        url = f"https://api-inference.huggingface.co/models/{model}"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {
+            "inputs": f"<|system|>\n{system}\n<|user|>\n{user}\n<|assistant|>\n",
+            "parameters": {
+                "max_new_tokens": max_tokens,
+                "temperature": 0.3,
+                "return_full_text": False,
+            },
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code == 503:
+                # Model loading — return empty
+                return f"[Modelo {model} carregando no HuggingFace. Tente novamente em alguns minutos.]"
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list) and data:
+                return data[0].get("generated_text", "")
+            return str(data)
+
+
 class LLMClient:
     def __init__(self):
         # Allow choosing between maritaca, ollama, or claude_cli
@@ -30,6 +121,10 @@ class LLMClient:
                 api_key=os.getenv("MARITACA_API_KEY", ""),
             )
             self.model = os.getenv("MARITACA_MODEL", "sabia-4")
+
+        # HuggingFace models (Jurema 7B + LongCat)
+        hf_key = os.getenv("HF_API_KEY", "")
+        self.hf_client = HuggingFaceClient(hf_key) if hf_key else None
 
     async def status(self) -> dict:
         if self.provider == "claude_cli":
@@ -68,6 +163,75 @@ class LLMClient:
             return await self._chat_claude_cli(system, user, json_mode)
         else:
             return await self._chat_openai(system, user, temperature, max_tokens)
+
+    async def chat_multi(
+        self,
+        system: str,
+        user: str,
+        section_title: str = "",
+        temperature: float = 0.3,
+        max_tokens: int = 3000,
+    ) -> dict[str, str]:
+        """
+        Run Claude CLI + Jurema 7B + LongCat in PARALLEL.
+        Returns dict with keys: 'claude', 'jurema', 'longcat'.
+        Claude writes the main text; Jurema enriches with jurisprudence;
+        LongCat validates legal reasoning.
+        """
+        # Claude: main document writer
+        claude_task = self.chat(system=system, user=user, max_tokens=max_tokens)
+
+        results = {"claude": "", "jurema": "", "longcat": ""}
+
+        if self.hf_client:
+            # Jurema: focused on extracting/citing jurisprudence
+            jurema_prompt = f"""Você é o modelo Jurema, especialista em direito brasileiro.
+Com base nas fontes de jurisprudência fornecidas, gere APENAS citações jurisprudenciais formatadas
+para a seção "{section_title}". Para cada jurisprudência:
+1. Transcreva a ementa ou trecho relevante entre aspas
+2. Formate: (Tribunal, Tipo Nº Processo, Rel. Min./Des. Nome, j. DD/MM/AAAA)
+3. Explique brevemente a relevância para o caso
+
+Responda APENAS com as citações formatadas, sem texto adicional."""
+
+            jurema_task = self.hf_client.chat_jurema(
+                system=jurema_prompt,
+                user=user,
+                temperature=0.2,
+                max_tokens=2000,
+            )
+
+            # LongCat: validate reasoning and suggest improvements
+            longcat_prompt = f"""You are a legal reasoning validator. Analyze the legal arguments
+for section "{section_title}" and provide:
+1. Key legal principles that apply (in Portuguese)
+2. Any logical gaps in the argumentation
+3. Suggested additional legal bases (Brazilian law articles, súmulas)
+
+Be concise. Respond in Portuguese."""
+
+            longcat_task = self.hf_client.chat_longcat(
+                system=longcat_prompt,
+                user=user,
+                temperature=0.2,
+                max_tokens=1500,
+            )
+
+            # Run all three in parallel
+            claude_result, jurema_result, longcat_result = await asyncio.gather(
+                claude_task, jurema_task, longcat_task,
+                return_exceptions=True,
+            )
+
+            results["claude"] = claude_result if isinstance(claude_result, str) else f"[Erro Claude: {claude_result}]"
+            results["jurema"] = jurema_result if isinstance(jurema_result, str) else ""
+            results["longcat"] = longcat_result if isinstance(longcat_result, str) else ""
+        else:
+            # No HF key — just use Claude
+            claude_result = await claude_task
+            results["claude"] = claude_result if isinstance(claude_result, str) else f"[Erro: {claude_result}]"
+
+        return results
 
     async def stream(
         self,
