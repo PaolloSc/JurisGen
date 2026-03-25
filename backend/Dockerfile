@@ -2,17 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps + Node.js (for Claude CLI)
-RUN apt-get update && apt-get install -y curl gcc git bash && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc bash ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI globally
-RUN npm install -g @anthropic-ai/claude-code
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 COPY . .
 

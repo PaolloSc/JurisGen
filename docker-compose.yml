@@ -1,6 +1,37 @@
-version: "3.9"
-
 services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  ollama-setup:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./backend/Modelfile.jurema:/Modelfile.jurema:ro
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    # Pull base model + create Jurema model from Modelfile
+    entrypoint: >
+      sh -c "
+        ollama pull rlmoura/Jurema-7B-Q4_K_M-GGUF &&
+        ollama create jurema -f /Modelfile.jurema &&
+        echo 'Jurema 7B pronto!'
+      "
+    restart: "no"
+
   backend:
     build: ./backend
     ports:
@@ -8,11 +39,14 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      - CLAUDE_AUTH_MODE=cli
-    volumes:
-      # Mount Claude credentials from host (needed for CLI auth)
-      - ${HOME}/.claude:/root/.claude:ro
-      - ${HOME}/.local/share/claude-code:/root/.local/share/claude-code:ro
+      - LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=jurema
+      - JUREMA_PROVIDER=ollama
+      - JUREMA_OLLAMA_MODEL=jurema
+    depends_on:
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -31,3 +65,12 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  ollama_data:
