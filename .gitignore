@@ -27,3 +27,15 @@ Thumbs.db
 # Temp
 *.log
 tmp/
+out.txt
+list[dict]
+
+# Modelos LLM (arquivos grandes — use Ollama pull)
+*.gguf
+*.bin
+*.safetensors
+backend/Jurema-7B/
+frontend/Jurema-7B/
+
+# Claude
+.claude/
