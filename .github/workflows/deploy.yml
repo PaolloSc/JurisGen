@@ -26,7 +26,7 @@ jobs:
   deploy-backend:
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ secrets.SERVER_HOST != '' }}
+    if: vars.ENABLE_BACKEND_DEPLOY == 'true'
     steps:
       - name: Deploy Backend via SSH
         uses: appleboy/ssh-action@v1
