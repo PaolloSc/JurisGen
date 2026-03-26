@@ -362,12 +362,9 @@ cors_origins = [
     *_cors_extra,
 ]
 
-# Regex covers all Cloudflare Tunnel / Pages / custom subdomains automatically
+# Regex covers trapiche.cloud deployments and local dev tunnels
 cors_origins_regex = (
-    r"https://.*\.trycloudflare\.com"      # Quick Tunnels
-    r"|https://.*\.pages\.dev"             # Cloudflare Pages
-    r"|https://.*\.cloudflare\.com"        # Cloudflare infra
-    r"|https://.*\.trapiche\.site"         # Trapiche.cloud deployments
+    r"https://.*\.trapiche\.site"          # Trapiche.cloud deployments
     r"|https://.*\.trapiche\.cloud"        # Trapiche.cloud deployments
 )
 

@@ -276,10 +276,11 @@ async def search_section_sources(
         # Run all searches in parallel
         datajud_task = search_datajud(topic, tribunais=tribunais, max_per_tribunal=2)
         ddg_task = search_duckduckgo_jurisprudencia(topic, case_context, max_results=max_juris)
+        jb_task = search_jusbrasil_jurisprudencia(topic, max_results=max_juris)
         doutrina_task = search_doutrina_targeted(topic, max_results=max_doutrina)
 
-        datajud_results, ddg_results, doutrina_results = await asyncio.gather(
-            datajud_task, ddg_task, doutrina_task,
+        datajud_results, ddg_results, jb_results, doutrina_results = await asyncio.gather(
+            datajud_task, ddg_task, jb_task, doutrina_task,
             return_exceptions=True,
         )
 
@@ -287,11 +288,13 @@ async def search_section_sources(
             datajud_results = []
         if isinstance(ddg_results, Exception):
             ddg_results = []
+        if isinstance(jb_results, Exception):
+            jb_results = []
         if isinstance(doutrina_results, Exception):
             doutrina_results = []
 
-        # Combine: DATAJUD first (structured), then DuckDuckGo (ementas)
-        juris = list(datajud_results) + list(ddg_results)
+        # Combine: JusBrasil (Real, limpo) first, then DATAJUD, then DuckDuckGo
+        juris = list(jb_results) + list(datajud_results) + list(ddg_results)
         juris = _deduplicate(juris)[:max_juris]
         doutrina = list(doutrina_results)
 
