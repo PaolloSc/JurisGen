@@ -367,6 +367,8 @@ cors_origins_regex = (
     r"https://.*\.trycloudflare\.com"      # Quick Tunnels
     r"|https://.*\.pages\.dev"             # Cloudflare Pages
     r"|https://.*\.cloudflare\.com"        # Cloudflare infra
+    r"|https://.*\.trapiche\.site"         # Trapiche.cloud deployments
+    r"|https://.*\.trapiche\.cloud"        # Trapiche.cloud deployments
 )
 
 # Also add any custom regex from env (e.g. CORS_REGEX=https://.*\.meudominio\.com)
