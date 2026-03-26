@@ -876,7 +876,15 @@ export default function JurisGenApp() {
       const d = await r.json();
       setSessionId(d.id);
       return d.id;
-    } catch (e) { setError("Falha ao conectar ao servidor: " + e.message); return null; }
+    } catch (e) {
+      const backendUrl = import.meta.env.VITE_API_BASE;
+      if (!backendUrl) {
+        setError("Backend não configurado. Defina o secret VITE_API_BASE no GitHub com a URL do servidor e faça um novo deploy.");
+      } else {
+        setError("Falha ao conectar ao servidor (" + backendUrl + "): " + e.message);
+      }
+      return null;
+    }
   }, [sessionId]);
 
   useEffect(() => { ensureSession(); }, []);
