@@ -1,26 +1,22 @@
 @echo off
-REM Uso: update_tunnel_url.bat https://xxx.trycloudflare.com
-REM Atualiza _redirects e faz push automaticamente
+REM Uso: update_tunnel_url.bat https://SEU-BACKEND.up.railway.app
+REM Atualiza _redirects com a URL do backend e faz push
 
 if "%~1"=="" (
-    echo Uso: update_tunnel_url.bat https://xxx.trycloudflare.com
+    echo Uso: update_tunnel_url.bat https://SEU-BACKEND.up.railway.app
     exit /b 1
 )
 
-set "TUNNEL_URL=%~1"
-set "REPO_DIR=%~dp0"
-set "REDIRECTS=%REPO_DIR%frontend\public\_redirects"
+set BACKEND_URL=%~1
+set REDIRECTS=%~dp0frontend\public\_redirects
 
-echo Atualizando _redirects com: %TUNNEL_URL%
-
-echo /api/*  %TUNNEL_URL%/api/:splat  200 > "%REDIRECTS%"
+echo /api/*  %BACKEND_URL%/api/:splat  200 > "%REDIRECTS%"
 echo /*    /index.html   200 >> "%REDIRECTS%"
 
-cd /d "%REPO_DIR%"
+cd /d "%~dp0"
 git add frontend/public/_redirects
-git commit -m "fix: update backend tunnel URL to %TUNNEL_URL%"
+git commit -m "fix: update backend URL to %BACKEND_URL%"
 git push origin main
 
 echo.
-echo Pronto! Trapiche.cloud vai reconstruir o frontend automaticamente.
-echo Aguarde ~1 minuto e acesse: https://jurisgen-proud-tiger.trapiche.site
+echo Pronto! Acesse: https://jurisgen-proud-tiger.trapiche.site
