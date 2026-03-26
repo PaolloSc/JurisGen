@@ -8,7 +8,15 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
+      - key: CLAUDE_AUTH_MODE
+        value: ""
+      - key: LLM_PROVIDER
+        value: anthropic
       - key: JUREMA_PROVIDER
         value: hf
       - key: HF_API_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-4-6
