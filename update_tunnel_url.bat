@@ -7,7 +7,10 @@ if "%~1"=="" (
     exit /b 1
 )
 
-set BACKEND_URL=%~1
+REM Strip trailing slashes and dots from URL
+set "BACKEND_URL=%~1"
+set "BACKEND_URL=%BACKEND_URL:/=%"
+for /f "tokens=*" %%a in ('powershell -command "('%~1').TrimEnd('/.')"') do set "BACKEND_URL=%%a"
 set REDIRECTS=%~dp0frontend\public\_redirects
 
 echo /api/*  %BACKEND_URL%/api/:splat  200 > "%REDIRECTS%"
