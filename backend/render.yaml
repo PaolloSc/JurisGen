@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: jurisgen-backend
+    runtime: python
+    buildCommand: pip install -r requirements_minimal.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: JUREMA_PROVIDER
+        value: hf
+      - key: HF_API_KEY
+        sync: false
