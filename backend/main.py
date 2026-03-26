@@ -350,34 +350,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
-_cors_env = os.getenv("CORS_ORIGINS", "")
-_cors_extra = [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else []
-
-cors_origins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    *_cors_extra,
-]
-
-# Regex covers trapiche.cloud deployments and local dev tunnels
-cors_origins_regex = (
-    r"https://.*\.trapiche\.site"          # Trapiche.cloud deployments
-    r"|https://.*\.trapiche\.cloud"        # Trapiche.cloud deployments
-)
-
-# Also add any custom regex from env (e.g. CORS_REGEX=https://.*\.meudominio\.com)
-_cors_regex_env = os.getenv("CORS_REGEX", "")
-if _cors_regex_env:
-    cors_origins_regex += f"|{_cors_regex_env}"
-
+# CORS — allow all origins (frontend is a public static site, no cookies used)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_origin_regex=cors_origins_regex,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
