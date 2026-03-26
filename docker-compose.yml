@@ -1,37 +1,4 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
-  ollama-setup:
-    image: ollama/ollama:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./backend/Modelfile.jurema:/Modelfile.jurema:ro
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-    # Pull base model + create Jurema model from Modelfile
-    entrypoint: >
-      sh -c "
-        ollama pull rlmoura/Jurema-7B-Q4_K_M-GGUF &&
-        ollama create jurema -f /Modelfile.jurema &&
-        echo 'Jurema 7B pronto!'
-      "
-    restart: "no"
-
   backend:
     build: ./backend
     ports:
@@ -39,14 +6,15 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      - LLM_PROVIDER=ollama
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=jurema
+      - CLAUDE_AUTH_MODE=cli
       - JUREMA_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - JUREMA_OLLAMA_MODEL=jurema
-    depends_on:
-      ollama:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${USERPROFILE:-${HOME}}/.claude:/root/.claude:ro
+      - ${USERPROFILE:-${HOME}}/.local/share/claude-code:/root/.local/share/claude-code:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -72,5 +40,3 @@ services:
       retries: 3
       start_period: 5s
 
-volumes:
-  ollama_data:
