@@ -259,6 +259,13 @@ class LLMClient:
         elif self.provider == "claude_cli":
             self.claude_path = os.getenv("CLAUDE_CLI_PATH", "claude")
             self.client = None
+        elif self.provider == "anthropic":
+            import anthropic as _anthropic
+            self.anthropic_client = _anthropic.AsyncAnthropic(
+                api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            )
+            self.model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-6")
+            self.client = None
         else:
             self.client = AsyncOpenAI(
                 base_url=os.getenv("MARITACA_BASE_URL", "https://chat.maritaca.ai/api"),
@@ -425,6 +432,13 @@ class LLMClient:
                 "message": f"Ollama ativo ({self.model})",
             }
 
+        if self.provider == "anthropic":
+            return {
+                "provider": "anthropic",
+                "available": bool(os.getenv("ANTHROPIC_API_KEY")),
+                "message": "Anthropic configurado" if os.getenv("ANTHROPIC_API_KEY") else "ANTHROPIC_API_KEY ausente",
+            }
+
         return {
             "provider": "maritaca",
             "available": bool(os.getenv("MARITACA_API_KEY")),
@@ -443,6 +457,8 @@ class LLMClient:
             return await self._chat_ollama(system, user, temperature, max_tokens)
         elif self.provider == "claude_cli":
             return await self._chat_claude_cli(system, user, json_mode)
+        elif self.provider == "anthropic":
+            return await self._chat_anthropic(system, user, temperature, max_tokens)
         else:
             return await self._chat_openai(system, user, temperature, max_tokens)
 
@@ -657,6 +673,18 @@ Be concise. Respond in Portuguese."""
                         yield chunk
                     if data.get("done"):
                         break
+
+    # ── Anthropic SDK ─────────────────────────────────────────────────────────
+
+    async def _chat_anthropic(self, system, user, temperature, max_tokens):
+        response = await self.anthropic_client.messages.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return response.content[0].text
 
     # ── OpenAI-compatible (Maritaca) ──────────────────────────────────────────
 
