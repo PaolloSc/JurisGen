@@ -17,8 +17,38 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from llm.client import LLMClient
+from llm.client import LLMClient, is_valid_legal_pt
 llm = LLMClient()
+
+
+# ─── Jurema 7B Prompts por Contexto ──────────────────────────
+JUREMA_CHAT_SYSTEM = """Você é o modelo Jurema, especialista em direito brasileiro com foco em jurisprudência.
+Analise a pergunta e forneça:
+1. Jurisprudência relevante (ementas, súmulas, OJs) que complementa
+2. Artigos de lei específicos aplicáveis
+3. Se houver erro jurídico, aponte com gentileza
+
+Seja conciso (máx 300 palavras). Responda em pt-BR.
+NÃO invente citações — use apenas conhecimento real."""
+
+JUREMA_ADVERSARIAL_SYSTEM = """Você é o modelo Jurema, especialista em jurisprudência brasileira.
+Encontre jurisprudência que FORTALECE a posição da parte adversária (réu).
+Para cada ponto vulnerável, cite ementas/súmulas que o réu usaria.
+Seja específico: tribunais, nº processo quando possível. Máx 500 palavras. pt-BR.
+NÃO invente citações — use apenas jurisprudência real."""
+
+JUREMA_VALIDATION_SYSTEM = """Você é o modelo Jurema, validador jurídico.
+Verifique se a correção é consistente com jurisprudência brasileira.
+Responda em JSON válido:
+{"valida": true/false, "jurisprudencia_reforco": "...", "jurisprudencia_contradiz": "...", "recomendacao": "..."}
+NÃO invente citações."""
+
+# Importar busca no JusBrasil
+try:
+    from jusbrasil_search import JusBrasilSearch
+    jusbrasil_search = JusBrasilSearch()
+except ImportError:
+    jusbrasil_search = None
 
 
 # ============== SharePoint / Graph API ==============
@@ -94,11 +124,18 @@ async def _sharepoint_search(query: str, limit: int = 10) -> list[dict]:
 
 
 async def _get_document_content(drive_id: str, item_id: str) -> str:
-    """Download and extract text from a SharePoint document."""
+    """Download and extract structured text from a SharePoint document using Docling."""
     token = _get_graph_token()
     headers = {"Authorization": f"Bearer {token}"}
 
+    # Get file metadata to know the extension
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        meta_resp = await client.get(
+            f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}",
+            headers=headers,
+        )
+        file_name = meta_resp.json().get("name", "document") if meta_resp.is_success else "document"
+
         resp = await client.get(
             f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}/content",
             headers=headers,
@@ -107,12 +144,53 @@ async def _get_document_content(drive_id: str, item_id: str) -> str:
             raise HTTPException(status_code=resp.status_code, detail="Failed to download document")
         content_bytes = resp.content
 
+    # Docling: structured extraction with layout, tables, headings
+    try:
+        import tempfile
+        from docling.document_converter import DocumentConverter
+
+        suffix = "." + file_name.rsplit(".", 1)[-1] if "." in file_name else ".pdf"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(content_bytes)
+            tmp_path = tmp.name
+
+        converter = DocumentConverter()
+        result = converter.convert(tmp_path)
+        md_text = result.document.export_to_markdown()
+
+        import os
+        os.unlink(tmp_path)
+
+        if md_text and md_text.strip():
+            return md_text[:6000]
+    except Exception as e:
+        print(f"[Docling] Falha na extração: {e}. Tentando fallback...")
+
+    # Fallback: python-docx para DOCX
     try:
         import docx, io
         doc = docx.Document(io.BytesIO(content_bytes))
         return "\n".join(p.text for p in doc.paragraphs if p.text.strip())[:3000]
     except Exception:
-        return content_bytes[:3000].decode("utf-8", errors="ignore")
+        pass
+
+    # Fallback: PyPDF2 para PDF
+    try:
+        import PyPDF2, io
+        reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
+        text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+        if text.strip():
+            return text[:4000]
+    except Exception:
+        pass
+
+    if b'\x00' in content_bytes[:1000] or content_bytes[:4] == b'%PDF':
+        return "[Documento em formato binário não suportado ou falha na extração de texto.]"
+
+    try:
+        return content_bytes[:4000].decode("utf-8", errors="ignore")
+    except Exception:
+        return "[Falha ao tentar ler o arquivo como texto UTF-8]"
 
 
 # ============== CNJ DataJud API ==============
@@ -244,12 +322,24 @@ class ChatRequest(BaseModel):
 
 # ============== App Setup ==============
 
+from sharepoint_sync import (
+    start_scheduler as sp_start_scheduler,
+    stop_scheduler as sp_stop_scheduler,
+    run_sync as sp_run_sync,
+    sync_state as sp_sync_state,
+    list_local_files as sp_list_local_files,
+    FILES_DIR as SP_FILES_DIR,
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("JurisGen AI Backend started")
+    sp_start_scheduler()
     yield
     # Shutdown
+    sp_stop_scheduler()
     print("JurisGen AI Backend shutting down")
 
 
@@ -261,15 +351,29 @@ app = FastAPI(
 )
 
 # CORS
+_cors_env = os.getenv("CORS_ORIGINS", "")
+_cors_extra = [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else []
+
 cors_origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
-    "https://*.trycloudflare.com",
+    *_cors_extra,
 ]
-# Allow all origins when behind Cloudflare tunnel
-cors_origins_regex = r"https://.*\.trycloudflare\.com"
+
+# Regex covers all Cloudflare Tunnel / Pages / custom subdomains automatically
+cors_origins_regex = (
+    r"https://.*\.trycloudflare\.com"      # Quick Tunnels
+    r"|https://.*\.pages\.dev"             # Cloudflare Pages
+    r"|https://.*\.cloudflare\.com"        # Cloudflare infra
+)
+
+# Also add any custom regex from env (e.g. CORS_REGEX=https://.*\.meudominio\.com)
+_cors_regex_env = os.getenv("CORS_REGEX", "")
+if _cors_regex_env:
+    cors_origins_regex += f"|{_cors_regex_env}"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -455,11 +559,13 @@ async def listar_documentos_sharepoint(request: dict):
 
 # ─── Background indexing state ───
 import asyncio
+from vector_store import index_document, semantic_search, get_stats as vs_get_stats
+
 indexing_status: dict[str, Any] = {"running": False, "progress": "", "indexed": [], "total_chunks": 0, "error": None}
 
 
 async def _run_indexing():
-    """Background task: download and index all SharePoint docs."""
+    """Background task: download SharePoint docs, extract with Docling, index in ChromaDB."""
     global indexing_status
     indexing_status = {"running": True, "progress": "Iniciando...", "indexed": [], "total_chunks": 0, "error": None}
 
@@ -467,6 +573,9 @@ async def _run_indexing():
         token = _get_graph_token()
         drive_id = os.getenv("SHAREPOINT_DRIVE_ID", "")
         headers_graph = {"Authorization": f"Bearer {token}"}
+
+        # Run blocking Docling/embedding calls in a thread pool
+        loop = asyncio.get_event_loop()
 
         async def index_folder(client, folder_path="root", folder_name=""):
             url = f"{GRAPH_BASE}/drives/{drive_id}/{folder_path}/children?$top=100"
@@ -484,7 +593,7 @@ async def _run_indexing():
                     if ext not in ("docx", "doc", "pdf", "txt"):
                         continue
 
-                    indexing_status["progress"] = f"Baixando: {name}"
+                    indexing_status["progress"] = f"Baixando e convertendo: {name}"
 
                     try:
                         dl_resp = await client.get(
@@ -498,43 +607,41 @@ async def _run_indexing():
                             continue
 
                         content_bytes = dl_resp.content
-                        text = ""
+                        web_url = item.get("webUrl", "")
 
-                        if ext == "docx":
-                            import docx, io
-                            doc = docx.Document(io.BytesIO(content_bytes))
-                            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-                        elif ext == "pdf":
-                            import fitz
-                            pdf = fitz.open(stream=content_bytes, filetype="pdf")
-                            text = "\n".join(page.get_text() for page in pdf)
-                            pdf.close()
-                        elif ext == "txt":
-                            text = content_bytes.decode("utf-8", errors="ignore")
+                        indexing_status["progress"] = f"Indexando (Docling + vetores): {name}"
 
-                        if not text.strip():
-                            indexing_status["indexed"].append({"name": name, "chunks": 0, "status": "sem texto"})
-                            continue
+                        # Run blocking I/O (Docling + embeddings + ChromaDB) in thread pool
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda b=content_bytes, n=name, f=folder_name, u=web_url: index_document(
+                                file_bytes=b,
+                                filename=n,
+                                folder=f,
+                                web_url=u,
+                                source="sharepoint",
+                            )
+                        )
 
-                        chunk_size = 1000
-                        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+                        # Keep in-memory store as a lightweight cache for quick preview
+                        if result.get("status") in ("indexed", "skipped"):
+                            already = any(d["name"] == name for d in document_store)
+                            if not already:
+                                document_store.append({
+                                    "name": name,
+                                    "folder": folder_name,
+                                    "chunks": result.get("chunks", 0),
+                                    "source": "sharepoint",
+                                    "web_url": web_url,
+                                    "preview": result.get("preview", ""),
+                                })
 
-                        document_store.append({
-                            "name": name,
-                            "folder": folder_name,
-                            "content": text,
-                            "chunks": len(chunks),
-                            "chunk_texts": chunks,
-                            "source": "sharepoint",
-                            "web_url": item.get("webUrl", ""),
-                            "preview": text[:200],
-                        })
-                        indexing_status["total_chunks"] += len(chunks)
+                        indexing_status["total_chunks"] += result.get("chunks", 0)
                         indexing_status["indexed"].append({
                             "name": name,
-                            "chunks": len(chunks),
-                            "preview": text[:180],
-                            "status": "indexado",
+                            "chunks": result.get("chunks", 0),
+                            "preview": result.get("preview", "")[:180],
+                            "status": result.get("status", "indexado"),
                         })
 
                     except Exception as e:
@@ -545,7 +652,7 @@ async def _run_indexing():
 
         n = len(indexing_status["indexed"])
         c = indexing_status["total_chunks"]
-        indexing_status["progress"] = f"Concluído: {n} documentos, {c} trechos."
+        indexing_status["progress"] = f"Concluído: {n} documentos, {c} trechos no banco vetorial."
     except Exception as e:
         indexing_status["error"] = str(e)
         indexing_status["progress"] = f"Erro: {e}"
@@ -588,28 +695,156 @@ async def indexar_status():
 
 @app.get("/api/documentos-indexados")
 async def listar_documentos_indexados():
-    """List all documents currently indexed in memory."""
-    docs = []
-    for d in document_store:
-        docs.append({
-            "name": d["name"],
-            "folder": d.get("folder", ""),
-            "chunks": d.get("chunks", 0),
-            "preview": d.get("preview", "")[:200],
-            "web_url": d.get("web_url", ""),
-            "source": d.get("source", ""),
-        })
-    return {
-        "total": len(docs),
-        "total_chunks": sum(d["chunks"] for d in docs),
-        "documentos": docs,
-    }
+    """List all documents indexed in ChromaDB (persisted) plus in-memory cache."""
+    try:
+        stats = vs_get_stats()
+        return {
+            "total": stats["total_documents"],
+            "total_chunks": stats["total_chunks"],
+            "documentos": [{"name": n} for n in stats.get("documents", [])],
+            "chroma_path": stats.get("chroma_path", ""),
+        }
+    except Exception:
+        # Fallback to in-memory store
+        docs = [
+            {
+                "name": d["name"],
+                "folder": d.get("folder", ""),
+                "chunks": d.get("chunks", 0),
+                "preview": d.get("preview", "")[:200],
+                "web_url": d.get("web_url", ""),
+                "source": d.get("source", ""),
+            }
+            for d in document_store
+        ]
+        return {
+            "total": len(docs),
+            "total_chunks": sum(d["chunks"] for d in docs),
+            "documentos": docs,
+        }
+
+
+# ─── RAG endpoints ────────────────────────────────────────────────────────────
+
+class RagSearchRequest(BaseModel):
+    query: str
+    n_results: int = 5
+    source: Optional[str] = None
+
+
+@app.post("/api/rag/search")
+async def rag_search(request: RagSearchRequest):
+    """
+    Semantic search over indexed documents using vector embeddings.
+    Returns the most relevant text chunks for the given query.
+    """
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(
+        None,
+        lambda: semantic_search(
+            query=request.query,
+            n_results=request.n_results,
+            filter_source=request.source,
+        )
+    )
+    return {"query": request.query, "results": results, "total": len(results)}
+
+
+@app.get("/api/rag/stats")
+async def rag_stats():
+    """Return ChromaDB vector store statistics."""
+    loop = asyncio.get_event_loop()
+    stats = await loop.run_in_executor(None, vs_get_stats)
+    return stats
 
 
 @app.post("/api/sharepoint/upload")
 async def upload_sharepoint_file():
     """Handle file upload to session (placeholder for multipart)."""
-    raise HTTPException(status_code=501, detail="Use a rota /api/indexar-sharepoint para carregar documentos.")
+    raise HTTPException(status_code=501, detail="Use a rota /api/sharepoint/sync para sincronizar documentos.")
+
+
+# ─── SharePoint Auto-Sync endpoints ──────────────────────────────────────────
+
+class SyncRequest(BaseModel):
+    force: bool = False
+
+
+@app.post("/api/sharepoint/sync")
+async def trigger_sharepoint_sync(request: SyncRequest = SyncRequest()):
+    """
+    Trigger an immediate SharePoint library sync.
+    Downloads all files, converts with Docling, and indexes in ChromaDB.
+    Set force=true to re-index already-cached files.
+    """
+    if sp_sync_state["running"]:
+        return {
+            "message": "Sincronização já em andamento.",
+            "status": sp_sync_state,
+        }
+    asyncio.create_task(sp_run_sync(force=request.force))
+    return {"message": "Sincronização iniciada.", "status": sp_sync_state}
+
+
+@app.get("/api/sharepoint/sync-status")
+async def sharepoint_sync_status():
+    """Return the current sync status and file list."""
+    return sp_sync_state
+
+
+@app.get("/api/sharepoint/biblioteca")
+async def listar_biblioteca_local():
+    """
+    List all locally cached SharePoint files (from disk manifest).
+    These files are immediately available for use in JurisGen sessions.
+    """
+    loop = asyncio.get_event_loop()
+    files = await loop.run_in_executor(None, sp_list_local_files)
+    total_size = sum(f.get("size", 0) for f in files)
+    total_chunks = sum(f.get("chunks", 0) for f in files)
+    return {
+        "total": len(files),
+        "total_size_bytes": total_size,
+        "total_chunks": total_chunks,
+        "last_sync": sp_sync_state.get("last_sync"),
+        "next_sync": sp_sync_state.get("next_sync"),
+        "files": files,
+    }
+
+
+@app.get("/api/sharepoint/files/{item_id}")
+async def download_cached_file(item_id: str):
+    """
+    Download a locally cached SharePoint file by its item ID.
+    Returns the raw file bytes with appropriate Content-Type.
+    """
+    from fastapi.responses import FileResponse
+    loop = asyncio.get_event_loop()
+    files = await loop.run_in_executor(None, sp_list_local_files)
+
+    file_info = next((f for f in files if f["item_id"] == item_id), None)
+    if not file_info:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado no cache local.")
+
+    local_path = file_info.get("local_path", "")
+    if not local_path or not os.path.exists(local_path):
+        raise HTTPException(status_code=404, detail="Arquivo não disponível localmente. Sincronize novamente.")
+
+    name = file_info["name"]
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    media_types = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "doc": "application/msword",
+        "txt": "text/plain; charset=utf-8",
+    }
+    media_type = media_types.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=local_path,
+        filename=name,
+        media_type=media_type,
+    )
 
 
 # ─── Sessions ───
@@ -935,6 +1170,61 @@ async def generate_document(session_id: str):
         build_verification_block,
     )
 
+    # Função de busca dinâmica de jurisprudência
+    def _search_sumulas_dinamicas(query: str) -> list[dict[str, Any]]:
+        """Busca dinâmica de súmulas e jurisprudência para complementar o raciocínio do LLM"""
+        resultados = []
+        
+        # Buscar no JusBrasil se disponível
+        if jusbrasil_search:
+            try:
+                # Tentar login automático se houver credenciais
+                email = os.getenv("JUSBRASIL_EMAIL", "")
+                password = os.getenv("JUSBRASIL_PASSWORD", "")
+                
+                if email and password:
+                    if not hasattr(jusbrasil_search, '_logged_in'):
+                        jusbrasil_search.login(email, password)
+                        jusbrasil_search._logged_in = True
+                    
+                    # Buscar jurisprudência relevante
+                    jurisprudencia = jusbrasil_search.buscar_jurisprudencia(query, "TST", 5)
+                    sumulas = jusbrasil_search.buscar_sumulas(f"{query} TST", 3)
+                    
+                    resultados.extend(jurisprudencia)
+                    resultados.extend(sumulas)
+            except Exception as e:
+                print(f"Aviso: Falha ao buscar no JusBrasil: {e}")
+        
+        # Buscar em fontes públicas alternativas
+        try:
+            # Buscar no TST
+            import requests
+            from bs4 import BeautifulSoup
+            
+            # Buscar no site do TST
+            search_url = f"https://www.tst.jus.br/busca/-/search/contents?searchTerm={query.replace(' ', '+')}"
+            response = requests.get(search_url, timeout=10)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # Extrair resultados relevantes
+                for item in soup.find_all(['div', 'article'], limit=5):
+                    texto = item.get_text(strip=True)
+                    if len(texto) > 100 and any(keyword in texto.lower() for keyword in ['súmula', 'sumula', 'tst', 'tribunal']):
+                        resultados.append({
+                            "tipo": "Jurisprudência Pública",
+                            "texto": texto[:500],
+                            "fonte": "TST - Busca Pública",
+                            "url": search_url,
+                            "data_busca": datetime.now().isoformat()
+                        })
+        except Exception as e:
+            print(f"Aviso: Falha ao buscar no TST: {e}")
+        
+        return resultados
+
     session = get_session(session_id)
     doc_type = session.doc_type or "Documento Jurídico"
     answers_text = "\n".join(f"- {k}: {v}" for k, v in session.answers.items())
@@ -944,11 +1234,24 @@ async def generate_document(session_id: str):
     # Case context summary for targeted searches
     case_context = f"{doc_type} {' '.join(list(session.answers.values())[:3])}"[:200]
 
-    # Build reference context from indexed documents
+    # Build reference context using semantic RAG search
     docs_context = ""
-    if document_store:
-        previews = [f"[{d['name']}]: {d.get('preview', '')[:300]}" for d in document_store[:5]]
-        docs_context = f"\n\nDocumentos de referência do escritório:\n" + "\n".join(previews)
+    try:
+        loop = asyncio.get_event_loop()
+        rag_hits = await loop.run_in_executor(
+            None,
+            lambda: semantic_search(query=case_context, n_results=5)
+        )
+        if rag_hits:
+            rag_snippets = [
+                f"[{h['filename']}] (score={h['score']}): {h['text'][:300]}"
+                for h in rag_hits
+            ]
+            docs_context = "\n\nDocumentos relevantes do escritório (busca semântica):\n" + "\n\n".join(rag_snippets)
+    except Exception:
+        if document_store:
+            previews = [f"[{d['name']}]: {d.get('preview', '')[:300]}" for d in document_store[:5]]
+            docs_context = "\n\nDocumentos de referência do escritório:\n" + "\n".join(previews)
 
     async def stream_sections():
         # Collect ALL sources across sections for the final verification block
@@ -1130,7 +1433,7 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
 
             # Track which models contributed
             models_used = ["Claude CLI"]
-            if llm.hf_client:
+            if llm.jurema_available:
                 if _is_valid_legal_pt(multi.get("jurema", "")):
                     models_used.append("Jurema 7B")
                 if _is_valid_legal_pt(multi.get("longcat", "")):
@@ -1298,6 +1601,36 @@ Informações do caso:
             "data": {"vulnerabilities": vulnerabilities, "total": len(vulnerabilities)},
         }, ensure_ascii=False) + "\n"
 
+        # ── Step 2b: Enrich with Jurema adversarial jurisprudence ──
+        if llm.jurema_available:
+            yield _json.dumps({
+                "type": "status",
+                "data": {"step": "jurema_adversarial", "message": "Buscando jurisprudência adversarial com Jurema 7B..."},
+            }, ensure_ascii=False) + "\n"
+
+            jurema_adversarial_user = f"Peça jurídica:\n{document_text[:3000]}\n\nVulnerabilidades:\n{_json.dumps([v.get('title', '') for v in vulnerabilities[:5]], ensure_ascii=False)}"
+            try:
+                jurema_raw = await llm.chat_jurema(
+                    system=JUREMA_ADVERSARIAL_SYSTEM,
+                    user=jurema_adversarial_user,
+                    max_tokens=1000,
+                )
+                if jurema_raw and is_valid_legal_pt(jurema_raw):
+                    vulnerabilities.append({
+                        "id": f"v_jurema_{len(vulnerabilities)+1}",
+                        "title": "Jurisprudência adversarial (Jurema 7B)",
+                        "severity": "MEDIA",
+                        "category": "FUNDAMENTACAO",
+                        "description": jurema_raw,
+                        "correction": "Reforçar fundamentação com jurisprudência que neutralize estes precedentes adversários.",
+                    })
+                    yield _json.dumps({
+                        "type": "vulnerabilities",
+                        "data": {"vulnerabilities": vulnerabilities, "total": len(vulnerabilities), "jurema_enriched": True},
+                    }, ensure_ascii=False) + "\n"
+            except Exception as e:
+                print(f"[Jurema] Erro na análise adversarial: {e}")
+
         # ── Step 3: Generate Adversarial Document (Contestação) ──
         yield _json.dumps({
             "type": "status",
@@ -1363,8 +1696,9 @@ Use linguagem jurídica formal brasileira."""
 async def apply_correction(session_id: str, request: dict):
     """
     Aplica uma correção de vulnerabilidade ao texto de uma seção.
+    Valida com Jurema se a correção é consistente com jurisprudência.
     Recebe: section_text, vulnerability (title + correction)
-    Retorna: texto corrigido da seção.
+    Retorna: texto corrigido + validação Jurema.
     """
     session = get_session(session_id)
     section_text = request.get("section_text", "")
@@ -1392,14 +1726,33 @@ Retorne APENAS o texto corrigido, sem explicações."""
     except Exception as e:
         corrected = section_text  # Return original on error
 
-    return {"corrected_text": corrected}
+    # Validate with Jurema
+    jurema_validation = None
+    if llm.jurema_available:
+        try:
+            jurema_user = f"Vulnerabilidade: {vuln_title}\nCorreção sugerida: {vuln_correction}\nTexto original:\n{section_text[:1500]}"
+            jurema_raw = await llm.chat_jurema(
+                system=JUREMA_VALIDATION_SYSTEM,
+                user=jurema_user,
+                max_tokens=800,
+            )
+            if jurema_raw and is_valid_legal_pt(jurema_raw):
+                import json as _json
+                try:
+                    jurema_validation = _json.loads(jurema_raw)
+                except:
+                    jurema_validation = {"recomendacao": jurema_raw, "valida": True}
+        except Exception as e:
+            print(f"[Jurema] Erro na validação de correção: {e}")
+
+    return {"corrected_text": corrected, "jurema_validation": jurema_validation}
 
 
 # ─── Chat ───
 
 @app.post("/api/chat")
 async def chat_message(request: ChatRequest):
-    """Free-form chat with AI."""
+    """Free-form chat with AI + Jurema enrichment."""
     session = get_session(request.session_id)
 
     session.messages.append({
@@ -1413,9 +1766,20 @@ async def chat_message(request: ChatRequest):
     doc_type = session.doc_type or "documento jurídico"
     answers_text = "\n".join(f"- {k}: {v}" for k, v in session.answers.items()) if session.answers else "Nenhuma informação coletada ainda."
 
+    # RAG: semantic search for relevant office documents
     docs_context = ""
-    if document_store:
-        docs_context = f"\nVocê tem {len(document_store)} documentos de referência do escritório indexados na memória."
+    try:
+        _loop = asyncio.get_event_loop()
+        _hits = await _loop.run_in_executor(
+            None,
+            lambda: semantic_search(query=request.message, n_results=3)
+        )
+        if _hits:
+            _snippets = [f"[{h['filename']}]: {h['text'][:250]}" for h in _hits]
+            docs_context = "\nDocumentos relevantes do escritório:\n" + "\n\n".join(_snippets)
+    except Exception:
+        if document_store:
+            docs_context = f"\nVocê tem {len(document_store)} documentos de referência do escritório indexados."
 
     # Recent message history for context
     recent = session.messages[-10:]
@@ -1430,23 +1794,36 @@ Responda de forma profissional, direta e útil. Se o usuário pedir ajustes no d
 Se pedir informações jurídicas, responda com base na legislação brasileira."""
 
     try:
-        response_text = await llm.chat(
+        # Use chat_with_jurema for parallel Claude + Jurema
+        result = await llm.chat_with_jurema(
             system=system_prompt,
             user=f"Histórico recente:\n{history}\n\nMensagem atual: {request.message}",
+            jurema_system=JUREMA_CHAT_SYSTEM,
+            jurema_user=f"Pergunta do usuário: {request.message}",
+            max_tokens=2000,
+            jurema_max_tokens=800,
         )
+        response_text = result["claude"]
+        jurema_text = result.get("jurema")
+
+        # Append Jurema jurisprudence as complementary note
+        if jurema_text:
+            response_text += f"\n\n---\n**📚 Jurisprudência (Jurema 7B):**\n{jurema_text}"
     except Exception as e:
         response_text = f"Erro ao processar: {str(e)[:200]}"
+        jurema_text = None
 
     response = {
         "role": "assistant",
         "type": "text",
         "content": response_text,
         "timestamp": datetime.now().isoformat(),
+        "jurema_used": jurema_text is not None,
     }
     session.messages.append(response)
     update_session(session)
 
-    return {"response": response_text}
+    return {"response": response_text, "jurema_used": jurema_text is not None}
 
 
 @app.get("/api/sessions/{session_id}/messages")
