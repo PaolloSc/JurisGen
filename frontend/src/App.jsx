@@ -981,9 +981,14 @@ export default function JurisGenApp() {
     try {
       const sid = sessionId || await ensureSession();
       const r = await fetch(`${API}/api/pipeline/generate-document/${sid}`, { method: "POST" });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({ detail: r.statusText }));
+        throw new Error(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail));
+      }
       const reader = r.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let sectionCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -999,15 +1004,22 @@ export default function JurisGenApp() {
             if (ev.type === "research") {
               setResearchLog(prev => [...prev, ev.data]);
             } else if (ev.type === "section") {
+              sectionCount++;
               setSections(prev => {
                 const next = [...prev, ev.data];
                 setCurrentSection(next.length - 1);
                 return next;
               });
+            } else if (ev.type === "error") {
+              throw new Error(ev.message || "Erro na geração do documento");
             }
-          } catch {}
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
+          }
         }
       }
+      if (sectionCount === 0) throw new Error("Nenhuma seção gerada. Verifique a configuração do backend.");
       setStage("document");
       setStartTime(null);
     } catch (e) {
