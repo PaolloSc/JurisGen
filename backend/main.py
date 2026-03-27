@@ -1296,18 +1296,25 @@ FONTES PESQUISADAS ESPECIFICAMENTE PARA ESTA SEÇÃO:
 INSTRUÇÕES DE CITAÇÃO — PRIORIDADE ABSOLUTA:
 1. JURISPRUDÊNCIA TEM PRIORIDADE MÁXIMA. Foram encontradas {n_juris} jurisprudências acima.
 2. Você DEVE citar TODAS as {n_juris} jurisprudências, incorporando cada uma no corpo do texto.
-3. Para cada jurisprudência:
-   a) TRANSCREVA A EMENTA COMPLETA (ou o máximo do snippet fornecido) entre aspas duplas — NÃO resuma nem abrevia
-   b) Após a ementa, insira a referência: (Tribunal, Processo nº X, j. DD/MM/AAAA) [Fonte N]
-   c) Adicione análise de 1-2 frases explicando como a ementa sustenta o argumento do caso concreto
-4. Formato de ementa completa obrigatório:
-   "EMENTA: [texto integral da ementa conforme fornecido acima...]"
-   (Tribunal, Processo nº X, Rel. Min./Des. Y, j. DD/MM/AAAA) [Fonte N]
-5. Artigos de lei são COMPLEMENTARES às ementas — cite-os após cada bloco de jurisprudência.
-6. Para doutrina: transcreva o trecho relevante entre aspas e inclua [Fonte N].
-7. NÃO invente citações — use APENAS as fontes fornecidas acima.
-8. Se o snippet não tiver número de processo completo, cite pelo título e tribunal disponíveis.
-9. O texto desta seção DEVE ter no mínimo {max(n_juris, 3)} blocos de ementa transcrita.
+3. FORMATO OBRIGATÓRIO DE CITAÇÃO DE JURISPRUDÊNCIA — siga EXATAMENTE este modelo:
+
+   a) Primeiro, escreva um parágrafo introdutório contextualizando o ponto jurídico e apresentando a posição da jurisprudência sobre o tema. Exemplo:
+      "A jurisprudência da Suprema Corte é firme no sentido de resguardar o direito fundamental à identidade genética de forma ampla, não admitindo óbices procedimentais à sua concretização:"
+
+   b) Em seguida, transcreva a EMENTA COMPLETA em bloco recuado (parágrafo indentado), iniciando com "EMENTA:" em maiúsculas. Transcreva o texto INTEGRAL da ementa conforme fornecido — NÃO resuma, NÃO abrevia, NÃO use reticências. Se a ementa contiver itens numerados, mantenha a numeração original. Exemplo:
+      EMENTA: RECURSO EXTRAORDINÁRIO. DIREITO PROCESSUAL CIVIL E CONSTITUCIONAL. REPERCUSSÃO GERAL RECONHECIDA. [texto integral...]
+
+   c) IMEDIATAMENTE após o bloco da ementa (sem parágrafo intermediário), insira a referência completa entre parênteses no formato:
+      (SIGLA DO RECURSO nº NÚMERO, Relator(a): NOME DO RELATOR, ÓRGÃO JULGADOR, julgado em DD-MM-AAAA, TIPO DE PUBLICAÇÃO DJe-NNN DIVULG DD-MM-AAAA PUBLIC DD-MM-AAAA)
+      Exemplo: (RE 363889, Relator(a): DIAS TOFFOLI, Tribunal Pleno, julgado em 02-06-2011, ACÓRDÃO ELETRÔNICO REPERCUSSÃO GERAL – MÉRITO DJe-238 DIVULG 15-12-2011 PUBLIC 16-12-2011 RTJ VOL-00223-01 PP-00420)
+
+   d) Após a referência, escreva um parágrafo de análise conectando a jurisprudência ao caso concreto, explicando como ela sustenta o argumento apresentado.
+
+4. Artigos de lei são COMPLEMENTARES às ementas — cite-os no corpo do texto para reforçar o argumento, mas as ementas são o argumento central.
+5. Para doutrina: transcreva o trecho relevante entre aspas e inclua a referência bibliográfica completa.
+6. NÃO invente citações — use APENAS as fontes fornecidas acima.
+7. Se o snippet não tiver todos os dados de publicação, cite com os dados disponíveis (tribunal, relator, data de julgamento).
+8. O texto desta seção DEVE ter no mínimo {max(n_juris, 3)} blocos de ementa transcrita neste formato.
 """
             else:
                 sources_instruction = """
@@ -1330,13 +1337,14 @@ Fundamentação legal sugerida: {basis_text}
 REGRAS DE REDAÇÃO:
 - Use linguagem jurídica formal brasileira
 - PRIORIDADE DE CITAÇÃO: jurisprudência > súmulas > doutrina > artigos de lei
-- Cada seção substantiva DEVE ter no mínimo 3 ementas transcritas na íntegra das fontes pesquisadas
-- Transcreva SEMPRE a ementa COMPLETA — nunca resuma ou use reticências (...) dentro da ementa
-- Cada ementa deve ser seguida de análise de como ela se aplica ao caso concreto
+- Cada seção substantiva DEVE ter no mínimo 3 blocos de jurisprudência no formato: parágrafo introdutório → EMENTA em bloco recuado → referência completa entre parênteses → parágrafo de análise
+- Transcreva SEMPRE a ementa COMPLETA em bloco indentado, iniciando com "EMENTA:" — nunca resuma ou use reticências (...) dentro da ementa
+- A referência após a ementa DEVE conter: sigla do recurso, número, relator, órgão julgador, data de julgamento, dados de publicação (DJe, DIVULG, PUBLIC)
+- Cada ementa deve ser precedida de parágrafo contextualizando o ponto jurídico e seguida de análise conectando ao caso concreto
 - Artigos de lei são suporte — ementas transcritas na íntegra são o argumento central
 - Seja detalhista e extenso — esta seção será usada diretamente na peça
 - Para fatos: narrativa cronológica detalhada com os dados fornecidos
-- Para direito: blocos de ementa integral + artigo de lei como complemento + análise aplicada ao caso
+- Para direito: parágrafo introdutório → EMENTA em bloco recuado → referência completa (RE/REsp/RR nº, Relator, Órgão, data, DJe) → análise aplicada ao caso + artigo de lei como complemento
 - Para pedidos: lista enumerada e específica
 - Use os dados reais fornecidos pelo usuário
 - Para dados NÃO informados, use placeholders: [Nome Completo], [CPF], [RG], [Endereço], etc.
