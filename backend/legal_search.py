@@ -240,6 +240,57 @@ async def search_doutrina_targeted(
     return _deduplicate(results)[:max_results]
 
 
+# ─── JusBrasil (conta autenticada — ementa formatada) ────────
+
+async def search_jusbrasil_jurisprudencia(
+    tema: str,
+    max_results: int = 5,
+) -> list[dict[str, Any]]:
+    """
+    Busca jurisprudência no JusBrasil com conta autenticada.
+    Entra em cada resultado para extrair a ementa já formatada
+    (equivalente ao botão 'Copiar ementa').
+    """
+    import os
+
+    email = os.getenv("JUSBRASIL_EMAIL", "")
+    password = os.getenv("JUSBRASIL_PASSWORD", "")
+
+    if not email or not password:
+        return []
+
+    loop = asyncio.get_running_loop()
+
+    def _search():
+        try:
+            from jusbrasil_search import JusBrasilSearch
+
+            jb = JusBrasilSearch()
+            jb.login(email, password)
+            resultados = jb.buscar_jurisprudencia(tema, tribunal="", limite=max_results)
+
+            mapped = []
+            for r in resultados:
+                mapped.append({
+                    "type": "jurisprudencia",
+                    "title": r.get("titulo", r.get("texto", "")[:100]),
+                    "url": r.get("url", ""),
+                    "ementa": r.get("ementa", r.get("texto", "")),
+                    "snippet": r.get("ementa", r.get("texto", "")),
+                    "referencia_formatada": r.get("referencia_formatada", ""),
+                    "source": "JusBrasil",
+                    "tribunal": r.get("tribunal", ""),
+                    "processo": "",
+                })
+            return mapped
+        except Exception as e:
+            print(f"⚠️ Erro JusBrasil search: {e}")
+            return []
+
+    results = await loop.run_in_executor(None, _search)
+    return _deduplicate(results)[:max_results]
+
+
 # ─── Main per-section search function ─────────────────────────
 
 async def search_section_sources(
@@ -320,12 +371,13 @@ def format_section_sources(sources: dict) -> str:
     lines = []
 
     if sources.get("jurisprudencia"):
-        lines.append(f"JURISPRUDÊNCIA — {len(sources['jurisprudencia'])} ACÓRDÃOS (TRANSCREVA CADA EMENTA NA ÍNTEGRA NO CORPO DO TEXTO):")
+        lines.append(f"JURISPRUDÊNCIA — {len(sources['jurisprudencia'])} ACÓRDÃOS (TRANSCREVA CADA EMENTA JÁ FORMATADA, NA ÍNTEGRA, NO CORPO DO TEXTO):")
         for i, r in enumerate(sources["jurisprudencia"], 1):
             processo = r.get("processo", "")
             tribunal = r.get("tribunal", r.get("source", ""))
             data = r.get("data", "")
             ementa_text = r.get("ementa") or r.get("snippet", "")
+            referencia_formatada = r.get("referencia_formatada", "")
 
             lines.append(f"  [{i}] {r.get('title', '')}")
             if processo:
@@ -334,7 +386,9 @@ def format_section_sources(sources: dict) -> str:
             if data:
                 lines.append(f"      Data: {data}")
             lines.append(f"      URL: {r.get('url', '')}")
-            lines.append(f"      EMENTA COMPLETA (transcreva na íntegra, sem omitir nada):")
+            if referencia_formatada:
+                lines.append(f"      REFERÊNCIA PARA CITAÇÃO: {referencia_formatada}")
+            lines.append(f"      EMENTA COMPLETA JÁ FORMATADA (transcreva na íntegra, sem omitir nada, sem alterar a formatação):")
             lines.append(f"      {ementa_text}")
             lines.append("")
 
