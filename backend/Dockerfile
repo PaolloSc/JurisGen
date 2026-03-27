@@ -19,15 +19,18 @@ RUN pip install --no-cache-dir -r requirements_minimal.txt
 COPY . .
 
 ENV PORT=8000
-ENV CLAUDE_AUTH_MODE=cli
-ENV LLM_PROVIDER=claude_cli
 
 EXPOSE $PORT
 
-# Write credentials from env var (if set) then start server
+# Cria o diretório para as credenciais do Claude
+RUN mkdir -p /root/.claude
+
+# Comando final: decodifica as credenciais + inicia o uvicorn
 CMD bash -c '\
-  mkdir -p ~/.claude && \
-  if [ -n "$CLAUDE_CREDENTIALS_B64" ]; then \
-    echo "$CLAUDE_CREDENTIALS_B64" | base64 -d > ~/.claude/.credentials.json; \
-  fi && \
-  uvicorn main:app --host 0.0.0.0 --port $PORT'
+    if [ -n "$CLAUDE_CREDENTIALS_B64" ]; then \
+        echo "$CLAUDE_CREDENTIALS_B64" | base64 -d > /root/.claude/.credentials.json && \
+        echo "✅ Credenciais do Claude decodificadas com sucesso em /root/.claude/.credentials.json"; \
+    else \
+        echo "⚠️  AVISO: Variável CLAUDE_CREDENTIALS_B64 não foi definida"; \
+    fi && \
+    uvicorn main:app --host 0.0.0.0 --port $PORT'
