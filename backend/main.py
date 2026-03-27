@@ -1294,14 +1294,20 @@ FONTES PESQUISADAS ESPECIFICAMENTE PARA ESTA SEÇÃO:
 ══════════════════════════════════════════════
 
 INSTRUÇÕES DE CITAÇÃO — PRIORIDADE ABSOLUTA:
-1. JURISPRUDÊNCIA TEM PRIORIDADE sobre artigos de lei. Foram encontradas {n_juris} jurisprudências acima.
-2. Você DEVE citar TODAS as jurisprudências fornecidas acima, incorporando-as no corpo do texto.
-3. Para cada jurisprudência, extraia do snippet: número do processo, tribunal, relator, data, e a tese/ementa.
-4. Formato obrigatório: transcreva o trecho relevante da ementa entre aspas, seguido de (Tribunal, Processo nº X, Rel. Min. Y, j. DD/MM/AAAA) [Fonte N]
-5. Artigos de lei são COMPLEMENTARES — use-os para reforçar, mas a jurisprudência é o argumento principal.
-6. Para doutrina: mencione o artigo/autor conforme o snippet e inclua [Fonte N].
+1. JURISPRUDÊNCIA TEM PRIORIDADE MÁXIMA. Foram encontradas {n_juris} jurisprudências acima.
+2. Você DEVE citar TODAS as {n_juris} jurisprudências, incorporando cada uma no corpo do texto.
+3. Para cada jurisprudência:
+   a) TRANSCREVA A EMENTA COMPLETA (ou o máximo do snippet fornecido) entre aspas duplas — NÃO resuma nem abrevia
+   b) Após a ementa, insira a referência: (Tribunal, Processo nº X, j. DD/MM/AAAA) [Fonte N]
+   c) Adicione análise de 1-2 frases explicando como a ementa sustenta o argumento do caso concreto
+4. Formato de ementa completa obrigatório:
+   "EMENTA: [texto integral da ementa conforme fornecido acima...]"
+   (Tribunal, Processo nº X, Rel. Min./Des. Y, j. DD/MM/AAAA) [Fonte N]
+5. Artigos de lei são COMPLEMENTARES às ementas — cite-os após cada bloco de jurisprudência.
+6. Para doutrina: transcreva o trecho relevante entre aspas e inclua [Fonte N].
 7. NÃO invente citações — use APENAS as fontes fornecidas acima.
 8. Se o snippet não tiver número de processo completo, cite pelo título e tribunal disponíveis.
+9. O texto desta seção DEVE ter no mínimo {max(n_juris, 3)} blocos de ementa transcrita.
 """
             else:
                 sources_instruction = """
@@ -1324,11 +1330,13 @@ Fundamentação legal sugerida: {basis_text}
 REGRAS DE REDAÇÃO:
 - Use linguagem jurídica formal brasileira
 - PRIORIDADE DE CITAÇÃO: jurisprudência > súmulas > doutrina > artigos de lei
-- Cada seção substantiva DEVE ter no mínimo 2 citações de jurisprudência real das fontes pesquisadas
-- Artigos de lei são suporte — jurisprudência é o argumento central
-- Seja detalhista e completo — esta seção será usada diretamente na peça
+- Cada seção substantiva DEVE ter no mínimo 3 ementas transcritas na íntegra das fontes pesquisadas
+- Transcreva SEMPRE a ementa COMPLETA — nunca resuma ou use reticências (...) dentro da ementa
+- Cada ementa deve ser seguida de análise de como ela se aplica ao caso concreto
+- Artigos de lei são suporte — ementas transcritas na íntegra são o argumento central
+- Seja detalhista e extenso — esta seção será usada diretamente na peça
 - Para fatos: narrativa cronológica detalhada com os dados fornecidos
-- Para direito: fundamentação robusta com jurisprudência real + artigos de lei como complemento
+- Para direito: blocos de ementa integral + artigo de lei como complemento + análise aplicada ao caso
 - Para pedidos: lista enumerada e específica
 - Use os dados reais fornecidos pelo usuário
 - Para dados NÃO informados, use placeholders: [Nome Completo], [CPF], [RG], [Endereço], etc.
@@ -1351,7 +1359,7 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                     system=system_prompt,
                     user=user_msg,
                     section_title=section_title,
-                    max_tokens=3000,
+                    max_tokens=4500,
                 )
 
                 content = multi["claude"]

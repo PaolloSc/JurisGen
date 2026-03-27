@@ -247,7 +247,7 @@ async def search_section_sources(
     section_description: str,
     case_context: str,
     doc_type: str = "",
-    max_juris: int = 5,
+    max_juris: int = 8,
     max_doutrina: int = 2,
 ) -> dict[str, Any]:
     """
@@ -274,7 +274,7 @@ async def search_section_sources(
         tribunais = _pick_tribunais(doc_type)
 
         # Run all searches in parallel
-        datajud_task = search_datajud(topic, tribunais=tribunais, max_per_tribunal=2)
+        datajud_task = search_datajud(topic, tribunais=tribunais, max_per_tribunal=3)
         ddg_task = search_duckduckgo_jurisprudencia(topic, case_context, max_results=max_juris)
         jb_task = search_jusbrasil_jurisprudencia(topic, max_results=max_juris)
         doutrina_task = search_doutrina_targeted(topic, max_results=max_doutrina)
@@ -320,20 +320,22 @@ def format_section_sources(sources: dict) -> str:
     lines = []
 
     if sources.get("jurisprudencia"):
-        lines.append("JURISPRUDÊNCIA ENCONTRADA PARA ESTA SEÇÃO (CITE OBRIGATORIAMENTE):")
+        lines.append(f"JURISPRUDÊNCIA — {len(sources['jurisprudencia'])} ACÓRDÃOS (TRANSCREVA CADA EMENTA NA ÍNTEGRA NO CORPO DO TEXTO):")
         for i, r in enumerate(sources["jurisprudencia"], 1):
             processo = r.get("processo", "")
             tribunal = r.get("tribunal", r.get("source", ""))
             data = r.get("data", "")
+            ementa_text = r.get("ementa") or r.get("snippet", "")
 
-            lines.append(f"  [{i}] {r['title']}")
+            lines.append(f"  [{i}] {r.get('title', '')}")
             if processo:
-                lines.append(f"      Processo: {processo}")
+                lines.append(f"      Processo nº: {processo}")
             lines.append(f"      Tribunal: {tribunal}")
             if data:
                 lines.append(f"      Data: {data}")
             lines.append(f"      URL: {r.get('url', '')}")
-            lines.append(f"      Trecho/Ementa: {r.get('snippet', r.get('ementa', ''))}")
+            lines.append(f"      EMENTA COMPLETA (transcreva na íntegra, sem omitir nada):")
+            lines.append(f"      {ementa_text}")
             lines.append("")
 
     if sources.get("doutrina"):
