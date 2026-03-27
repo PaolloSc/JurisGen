@@ -568,10 +568,20 @@ Be concise. Respond in Portuguese."""
         loop = asyncio.get_running_loop()
         def _run():
             try:
-                # Claude CLI is a native .exe on Windows
-                claude_exe = os.path.join(os.path.expanduser("~"), ".local", "bin", "claude.exe")
-                if not os.path.exists(claude_exe):
-                    claude_exe = os.path.join(os.path.expanduser("~"), ".local", "bin", "claude")
+                # Resolve claude executable: use configured path first, then fallback locations
+                claude_exe = getattr(self, "claude_path", "claude")
+                if claude_exe == "claude" or not os.path.isabs(claude_exe):
+                    # Try common install locations before falling back to PATH lookup
+                    candidates = [
+                        "/usr/local/bin/claude",          # npm -g on Linux (Render)
+                        "/usr/bin/claude",
+                        os.path.join(os.path.expanduser("~"), ".local", "bin", "claude.exe"),  # Windows
+                        os.path.join(os.path.expanduser("~"), ".local", "bin", "claude"),
+                    ]
+                    for c in candidates:
+                        if os.path.exists(c):
+                            claude_exe = c
+                            break
 
                 env = os.environ.copy()
                 env["TERM"] = "dumb"
