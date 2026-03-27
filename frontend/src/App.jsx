@@ -298,7 +298,7 @@ function QuestionForm({ questions, onSubmit }) {
 function OutlineSection({ section, index, total, onEdit, onDelete, onDuplicate, onMove }) {
   const [expanded, setExpanded] = useState(true);
   if (!section) return null;
-  const _subs = section.subtopics || section.sub_topics || []; const subs = Array.isArray(_subs) ? _subs : typeof _subs === 'string' ? [_subs] : [];
+  const _subs = section.subtopics || section.sub_topics || []; const subs = (Array.isArray(_subs) ? _subs : typeof _subs === 'string' ? [_subs] : []).filter(Boolean);
   return (
     <div style={{
       background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
@@ -863,6 +863,10 @@ export default function JurisGenApp() {
 
   // Outline
   const [outline, setOutline] = useState(null);
+  const sanitizeOutline = (o) => {
+    if (!o) return o;
+    return { ...o, sections: (o.sections || []).filter(s => s && s.title) };
+  };
 
   // Document
   const [sections, setSections] = useState([]);
@@ -974,7 +978,7 @@ export default function JurisGenApp() {
         setAnswerRound(r => r + 1);
         setStage("questions");
       } else {
-        setOutline(d.outline);
+        setOutline(sanitizeOutline(d.outline));
         setStage(features.roteiro ? "outline" : "generating");
         if (!features.roteiro) handleGenerate();
       }
