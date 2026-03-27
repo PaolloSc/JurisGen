@@ -122,14 +122,14 @@ function ReasoningPanel({ steps, expanded, onToggle }) {
       {expanded ? (
         steps.map((s, i) => (
           <div key={i} style={{ padding: "10px 0 10px 24px", borderLeft: "2px solid rgba(255,255,255,0.06)", marginLeft: 7 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>{i + 1}. {s.title}</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>{s.desc}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>{i + 1}. {s?.title}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>{s?.desc}</div>
           </div>
         ))
       ) : (
         <div style={{ padding: "10px 0 10px 24px", borderLeft: "2px solid rgba(255,255,255,0.06)", marginLeft: 7 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>{steps.length}. {last.title}</div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>{last.desc}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>{steps.length}. {last?.title}</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>{last?.desc}</div>
         </div>
       )}
     </div>
@@ -1074,7 +1074,7 @@ export default function JurisGenApp() {
 
   const handleOutlineDuplicate = (idx) => {
     const secs = [...(outline.sections || [])];
-    secs.splice(idx + 1, 0, { ...secs[idx], title: secs[idx].title + " (cópia)" });
+    secs.splice(idx + 1, 0, { ...secs[idx], title: (secs[idx]?.title || "") + " (cópia)" });
     setOutline({ ...outline, sections: secs });
   };
 
@@ -1135,7 +1135,7 @@ export default function JurisGenApp() {
             {history.length === 0 && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", paddingLeft: 10 }}>Nenhum documento ainda</div>}
             {history.map(h => (
               <div key={h.id} style={{ padding: "6px 10px", fontSize: 12, color: "rgba(255,255,255,0.5)", cursor: "pointer", borderRadius: 6 }}>
-                {h.title.substring(0, 30)}...
+                {(h?.title || "").substring(0, 30)}...
               </div>
             ))}
           </div>
@@ -1333,12 +1333,12 @@ export default function JurisGenApp() {
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0a0a0f", color: "#fff" }}>
         <div style={{ height: 52, borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", padding: "0 20px", background: "rgba(255,255,255,0.02)" }}>
           <button onClick={() => setStage("questions")} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16, marginRight: 12 }}>←</button>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{outline.title || docType}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{outline?.title || docType}</span>
           <span style={{ marginLeft: 12, fontSize: 11, padding: "3px 10px", borderRadius: 12, background: "rgba(167,139,250,0.1)", color: "#a78bfa", fontWeight: 600 }}>{secs.length} etapas</span>
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "24px 48px", maxWidth: 800, margin: "0 auto", width: "100%" }}>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 4 }}>{outline.title || docType}</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 4 }}>{outline?.title || docType}</h2>
           <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
             <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{secs.length} etapas</span>
             {outline.subtitle && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>|</span>}
