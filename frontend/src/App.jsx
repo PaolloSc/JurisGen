@@ -297,6 +297,7 @@ function QuestionForm({ questions, onSubmit }) {
 
 function OutlineSection({ section, index, total, onEdit, onDelete, onDuplicate, onMove }) {
   const [expanded, setExpanded] = useState(true);
+  if (!section) return null;
   const _subs = section.subtopics || section.sub_topics || []; const subs = Array.isArray(_subs) ? _subs : typeof _subs === 'string' ? [_subs] : [];
   return (
     <div style={{
@@ -1083,7 +1084,7 @@ export default function JurisGenApp() {
     results: (r.sources || []).map(s => ({ title: s.title || s.law || "Referência", text: s.text || s.snippet || "", law: s.law }))
   }));
 
-  const outlineSections = outline?.sections || [];
+  const outlineSections = (outline?.sections || []).filter(s => s && s.title);
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
 
