@@ -20,6 +20,15 @@ export class ErrorBoundary extends Component {
   }
 }
 
+function friendlyNetworkError(e) {
+  const msg = e?.message || String(e);
+  if (msg === "Failed to fetch" || msg.includes("NetworkError") || msg.includes("network") || msg.includes("ERR_CONNECTION"))
+    return "Não foi possível conectar ao servidor. Verifique se o backend está ativo e tente novamente.";
+  if (msg === "The user aborted a request." || msg.includes("abort"))
+    return "Requisição cancelada por timeout. O servidor demorou muito para responder.";
+  return msg;
+}
+
 async function api(path, opts = {}) {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 180000);
@@ -33,6 +42,9 @@ async function api(path, opts = {}) {
       throw new Error(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail));
     }
     return r;
+  } catch (e) {
+    clearTimeout(tid);
+    throw new Error(friendlyNetworkError(e));
   } finally { clearTimeout(tid); }
 }
 
@@ -942,6 +954,7 @@ export default function JurisGenApp() {
   const [input, setInput] = useState("");
   const [docType, setDocType] = useState("");
   const [error, setError] = useState("");
+  const [backendStatus, setBackendStatus] = useState("checking"); // checking | online | offline
 
   // Features & settings
   const [features, setFeatures] = useState({ jurisprudencia: true, legislacao: true, modelos: false, contadoria: false, perguntas: true, roteiro: true });
@@ -996,9 +1009,11 @@ export default function JurisGenApp() {
       const r = await api("/api/sessions", { method: "POST", body: JSON.stringify({}) });
       const d = await r.json();
       setSessionId(d.id);
+      setBackendStatus("online");
       return d.id;
     } catch (e) {
-      setError("Falha ao conectar ao servidor: " + e.message + ". Verifique se o backend está ativo.");
+      setBackendStatus("offline");
+      setError(e.message);
       return null;
     }
   }, [sessionId]);
@@ -1101,7 +1116,8 @@ export default function JurisGenApp() {
 
     try {
       const sid = sessionId || await ensureSession();
-      const r = await fetch(`${API}/api/pipeline/generate-document/${sid}`, { method: "POST" });
+      const r = await fetch(`${API}/api/pipeline/generate-document/${sid}`, { method: "POST" })
+        .catch(e => { throw new Error(friendlyNetworkError(e)); });
       if (!r.ok) {
         const e = await r.json().catch(() => ({ detail: r.statusText }));
         throw new Error(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail));
@@ -1221,6 +1237,22 @@ export default function JurisGenApp() {
               style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left", marginBottom: 16 }}>
               + Nova minuta
             </button>
+            {/* Backend status pill */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 6, marginBottom: 12,
+              background: backendStatus === "online" ? "rgba(34,197,94,0.07)" : backendStatus === "offline" ? "rgba(239,68,68,0.08)" : "rgba(255,255,255,0.03)" }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                background: backendStatus === "online" ? "#22c55e" : backendStatus === "offline" ? "#ef4444" : "rgba(255,255,255,0.3)",
+                animation: backendStatus === "checking" ? "pulse 1.5s infinite" : "none" }} />
+              <span style={{ fontSize: 11, color: backendStatus === "online" ? "#4ade80" : backendStatus === "offline" ? "#f87171" : "rgba(255,255,255,0.4)" }}>
+                {backendStatus === "online" ? "Backend online" : backendStatus === "offline" ? "Backend offline" : "Conectando..."}
+              </span>
+              {backendStatus === "offline" && (
+                <button onClick={() => { setBackendStatus("checking"); setSessionId(null); ensureSession(); }}
+                  style={{ marginLeft: "auto", fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", cursor: "pointer" }}>
+                  Tentar
+                </button>
+              )}
+            </div>
             {["Compartilhamentos","Metadados CNJ","Comunicações DJEN","Histórico de Lote"].map(item => (
               <div key={item} style={{ padding: "8px 10px", fontSize: 12, color: "rgba(255,255,255,0.4)", cursor: "pointer", borderRadius: 6 }}
                 onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
