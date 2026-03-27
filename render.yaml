@@ -5,9 +5,11 @@ services:
     rootDir: backend
     dockerfilePath: ./Dockerfile
     envVars:
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: JUREMA_PROVIDER
         value: hf
       - key: HF_API_KEY
-        sync: false
-      - key: CLAUDE_CREDENTIALS_B64
         sync: false

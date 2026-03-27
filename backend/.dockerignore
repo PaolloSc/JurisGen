@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.pyc
+venv/
+.venv/
+.env
+*.log
+out.txt
+list[dict]
+*.gguf
+*.bin
+*.safetensors
+Jurema-7B/
