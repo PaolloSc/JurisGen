@@ -3,20 +3,22 @@ services:
     name: jurisgen-backend
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements_minimal.txt
+    buildCommand: >-
+      pip install -r requirements_minimal.txt &&
+      curl -fsSL https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.gz
+      | tar -xz -C /usr/local --strip-components=1 &&
+      npm install -g @anthropic-ai/claude-code
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
       - key: CLAUDE_AUTH_MODE
-        value: ""
+        value: cli
       - key: LLM_PROVIDER
-        value: anthropic
+        value: claude_cli
       - key: JUREMA_PROVIDER
         value: hf
       - key: HF_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: ANTHROPIC_MODEL
-        value: claude-opus-4-6
