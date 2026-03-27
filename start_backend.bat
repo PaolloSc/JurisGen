@@ -23,8 +23,10 @@ if not exist ".env" (
 )
 
 echo.
-echo Backend iniciando em http://localhost:8000
+echo Backend iniciando em http://localhost:8000 (Claude CLI)
 echo Pressione Ctrl+C para parar.
 echo.
 
+set CLAUDE_AUTH_MODE=cli
+set LLM_PROVIDER=claude_cli
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
