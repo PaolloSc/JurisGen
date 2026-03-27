@@ -448,14 +448,14 @@ function HistoricoPanel({ history, onReopen }) {
     <div style={{ flex: 1, overflowY: "auto", padding: 32 }}>
       <h2 style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 24 }}>Histórico de documentos</h2>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 720, margin: "0 auto" }}>
-        {history.map(h => (
+        {history.filter(h => h && h.title).map(h => (
           <div key={h.id} style={{
             background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
             borderRadius: 12, padding: "16px 20px", display: "flex", alignItems: "center", gap: 16
           }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(167,139,250,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.title}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h?.title}</div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{h.date}{h.sections ? ` · ${h.sections} seções` : ""}</div>
             </div>
             {onReopen && (
@@ -1231,7 +1231,7 @@ export default function JurisGenApp() {
           )}
 
           {activeTab === "historico" && (
-            <HistoricoPanel history={history} onReopen={(h) => { setActiveTab("inicio"); setInput(h.title); }} />
+            <HistoricoPanel history={history} onReopen={(h) => { setActiveTab("inicio"); setInput(h?.title || ''); }} />
           )}
 
           {activeTab === "modelos" && (
@@ -1432,7 +1432,7 @@ export default function JurisGenApp() {
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.5, marginBottom: 8 }}>ROTEIRO</div>
               {outlineSections.map((s, i) => {
-                const done = sections.some(sec => sec.section_title === s.title);
+                const done = sections.some(sec => sec.section_title === s?.title);
                 return (
                   <div key={i} style={{ display: "flex", gap: 8, padding: "5px 0", alignItems: "center", cursor: done ? "pointer" : "default", opacity: done ? 1 : 0.4 }}
                     onClick={() => { if (done) document.getElementById(`section-${i}`)?.scrollIntoView({ behavior: "smooth" }); }}>
@@ -1441,7 +1441,7 @@ export default function JurisGenApp() {
                       background: done ? "#22c55e" : "transparent", border: done ? "none" : "1.5px solid rgba(255,255,255,0.2)",
                       fontSize: 10, color: "#fff"
                     }}>{done ? "✓" : ""}</div>
-                    <span style={{ fontSize: 11, color: done ? "#fff" : "rgba(255,255,255,0.4)" }}>{s.title}</span>
+                    <span style={{ fontSize: 11, color: done ? "#fff" : "rgba(255,255,255,0.4)" }}>{s?.title}</span>
                   </div>
                 );
               })}
