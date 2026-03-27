@@ -22,4 +22,15 @@ ENV PORT=8000
 
 EXPOSE $PORT
 
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+# Cria o diretório para as credenciais do Claude
+RUN mkdir -p /root/.claude
+
+# Comando final: decodifica as credenciais + inicia o uvicorn
+CMD bash -c '\
+    if [ -n "$CLAUDE_CREDENTIALS_B64" ]; then \
+        echo "$CLAUDE_CREDENTIALS_B64" | base64 -d > /root/.claude/.credentials.json && \
+        echo "✅ Credenciais do Claude decodificadas com sucesso em /root/.claude/.credentials.json"; \
+    else \
+        echo "⚠️  AVISO: Variável CLAUDE_CREDENTIALS_B64 não foi definida"; \
+    fi && \
+    uvicorn main:app --host 0.0.0.0 --port $PORT'
