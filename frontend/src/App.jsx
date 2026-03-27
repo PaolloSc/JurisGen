@@ -116,19 +116,24 @@ function RefinementBar() {
   const [customText, setCustomText] = useState("");
   const inputRef = useRef(null);
 
+  // Focus the custom input whenever "Outro" becomes selected.
+  // useEffect runs after render and only when `selected` changes —
+  // avoiding the autoFocus bug where every customText keystroke
+  // caused a re-render that stole focus away from the input.
+  useEffect(() => {
+    if (selected === "__custom__" && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [selected]);
+
   const handleChip = (label) => {
     if (selected === label) {
-      // deselect
       setSelected(null);
       setCustomText("");
     } else {
       setSelected(label);
-      if (label === "__custom__") {
-        setCustomText("");
-        setTimeout(() => inputRef.current?.focus(), 30);
-      } else {
-        setCustomText(label);
-      }
+      if (label === "__custom__") setCustomText("");
+      else setCustomText(label);
     }
   };
 
@@ -183,7 +188,6 @@ function RefinementBar() {
               if (e.key === "Escape") { setSelected(null); setCustomText(""); }
             }}
             placeholder="Descreva o que deseja ajustar..."
-            autoFocus
             style={{
               flex: 1, padding: "8px 13px", borderRadius: 8,
               border: "1px solid rgba(167,139,250,0.3)", background: "rgba(167,139,250,0.04)",
@@ -326,6 +330,9 @@ function AnswersCard({ answers }) {
 function QuestionForm({ questions, onSubmit }) {
   const safeQ = Array.isArray(questions) ? questions : [];
   const [answers, setAnswers] = useState({});
+  // Tracks which question IDs have "Outro" free-text mode active.
+  // Separate from `answers` so typing doesn't unmount the input.
+  const [otherMode, setOtherMode] = useState({});
   const set = (id, val) => setAnswers(p => ({ ...p, [id]: val }));
   const answered = Object.keys(answers).filter(k => { const v = answers[k]; return v && (typeof v === "string" ? v.trim() : true); }).length;
   const required = safeQ.filter(q => q.required !== false).length;
@@ -367,14 +374,20 @@ function QuestionForm({ questions, onSubmit }) {
                   {opts.map(o => {
                     const sel = q.type === "multiple"
                       ? (answers[q.id] || []).includes(o.label)
-                      : answers[q.id] === o.label;
+                      : o.id === "other" ? !!otherMode[q.id] : answers[q.id] === o.label;
                     return (
                       <button key={o.id} onClick={() => {
                         if (q.type === "multiple") {
                           const cur = answers[q.id] || [];
                           set(q.id, sel ? cur.filter(x => x !== o.label) : [...cur, o.label]);
+                        } else if (o.id === "other") {
+                          // Toggle "Outro" mode; keep any text already typed
+                          const isOn = otherMode[q.id];
+                          setOtherMode(m => ({ ...m, [q.id]: !isOn }));
+                          if (!isOn) set(q.id, answers[q.id] || "");
                         } else {
-                          set(q.id, o.id === "other" ? "" : o.label);
+                          setOtherMode(m => ({ ...m, [q.id]: false }));
+                          set(q.id, o.label);
                         }
                       }} style={{
                         padding: "7px 16px", borderRadius: 20, fontSize: 12, cursor: "pointer",
@@ -386,9 +399,14 @@ function QuestionForm({ questions, onSubmit }) {
                       </button>
                     );
                   })}
-                  {answers[q.id] === "" && (
-                    <input autoFocus placeholder="Especifique..." onChange={e => set(q.id, e.target.value)}
-                      style={{ flex: 1, minWidth: 160, padding: "7px 14px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, outline: "none" }} />
+                  {otherMode[q.id] && (
+                    <input
+                      autoFocus
+                      value={answers[q.id] || ""}
+                      onChange={e => set(q.id, e.target.value)}
+                      placeholder="Especifique..."
+                      style={{ flex: 1, minWidth: 160, padding: "7px 14px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, outline: "none" }}
+                    />
                   )}
                 </div>
               ) : (
