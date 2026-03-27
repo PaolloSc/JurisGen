@@ -370,31 +370,55 @@ function QuestionForm({ questions, onSubmit }) {
             </div>
             <div style={{ paddingLeft: 34 }}>
               {(q.type === "choice" || q.type === "multiple") && opts.length > 0 ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <div>
+                  {/* Type hint */}
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: 6, letterSpacing: 0.3 }}>
+                    {q.type === "multiple" ? "☑ Selecione todas que se aplicam" : "◉ Selecione uma opção"}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {opts.map(o => {
-                    const sel = q.type === "multiple"
-                      ? (answers[q.id] || []).includes(o.label)
+                    const isMulti = q.type === "multiple";
+                    // For multiple: answers[q.id] is an array; ensure it's always treated as array
+                    const curArr = isMulti ? (Array.isArray(answers[q.id]) ? answers[q.id] : []) : null;
+                    const sel = isMulti
+                      ? curArr.includes(o.label)
                       : o.id === "other" ? !!otherMode[q.id] : answers[q.id] === o.label;
                     return (
                       <button key={o.id} onClick={() => {
-                        if (q.type === "multiple") {
-                          const cur = answers[q.id] || [];
-                          set(q.id, sel ? cur.filter(x => x !== o.label) : [...cur, o.label]);
+                        if (isMulti) {
+                          if (o.id === "other") {
+                            // For multiple+other: toggle otherMode
+                            const isOn = otherMode[q.id];
+                            setOtherMode(m => ({ ...m, [q.id]: !isOn }));
+                          } else {
+                            const next = sel ? curArr.filter(x => x !== o.label) : [...curArr, o.label];
+                            set(q.id, next);
+                          }
                         } else if (o.id === "other") {
-                          // Toggle "Outro" mode; keep any text already typed
                           const isOn = otherMode[q.id];
                           setOtherMode(m => ({ ...m, [q.id]: !isOn }));
-                          if (!isOn) set(q.id, answers[q.id] || "");
+                          if (!isOn) set(q.id, "");
                         } else {
                           setOtherMode(m => ({ ...m, [q.id]: false }));
                           set(q.id, o.label);
                         }
                       }} style={{
-                        padding: "7px 16px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        padding: "7px 14px", borderRadius: 8, fontSize: 12, cursor: "pointer",
+                        fontFamily: "inherit",
                         border: sel ? "1px solid #22c55e" : "1px solid rgba(255,255,255,0.1)",
                         background: sel ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.03)",
-                        color: sel ? "#22c55e" : "rgba(255,255,255,0.5)", fontWeight: sel ? 600 : 400
+                        color: sel ? "#22c55e" : "rgba(255,255,255,0.5)", fontWeight: sel ? 600 : 400,
+                        transition: "all 0.12s",
                       }}>
+                        {/* Checkbox or radio indicator */}
+                        <span style={{
+                          width: 14, height: 14, borderRadius: isMulti ? 3 : "50%", flexShrink: 0,
+                          border: sel ? "none" : "1.5px solid rgba(255,255,255,0.25)",
+                          background: sel ? "#22c55e" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 9, color: "#fff",
+                        }}>{sel ? "✓" : ""}</span>
                         {o.label}
                       </button>
                     );
@@ -402,12 +426,16 @@ function QuestionForm({ questions, onSubmit }) {
                   {otherMode[q.id] && (
                     <input
                       autoFocus
-                      value={answers[q.id] || ""}
-                      onChange={e => set(q.id, e.target.value)}
+                      value={q.type === "multiple" ? (answers[q.id + "__other"] || "") : (answers[q.id] || "")}
+                      onChange={e => {
+                        if (q.type === "multiple") set(q.id + "__other", e.target.value);
+                        else set(q.id, e.target.value);
+                      }}
                       placeholder="Especifique..."
-                      style={{ flex: 1, minWidth: 160, padding: "7px 14px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, outline: "none" }}
+                      style={{ flex: 1, minWidth: 160, padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, outline: "none", fontFamily: "inherit" }}
                     />
                   )}
+                  </div>
                 </div>
               ) : (
                 <textarea value={answers[q.id] || ""} onChange={e => set(q.id, e.target.value)}
