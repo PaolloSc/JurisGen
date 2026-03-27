@@ -589,6 +589,16 @@ Be concise. Respond in Portuguese."""
                 env = os.environ.copy()
                 env["TERM"] = "dumb"
                 env["PYTHONIOENCODING"] = "utf-8"
+                # Garante que HOME aponta para o diretório correto (importante no Docker/Linux)
+                if "HOME" not in env or not env["HOME"]:
+                    env["HOME"] = os.path.expanduser("~")
+                # Garante que o Claude CLI encontre as credenciais no diretório correto
+                claude_home = os.path.join(env["HOME"], ".claude")
+                if os.path.isdir(claude_home):
+                    env["CLAUDE_CONFIG_DIR"] = claude_home
+                # Desativa qualquer telemetria/interatividade
+                env["NO_COLOR"] = "1"
+                env["CI"] = "1"
                 # Claude Code on Windows needs git-bash path
                 if "CLAUDE_CODE_GIT_BASH_PATH" not in env:
                     git_bash_path = r"C:\Users\paollo\AppData\Local\Programs\Git\bin\bash.exe"
