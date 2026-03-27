@@ -2,8 +2,7 @@ services:
   - type: web
     name: jurisgen-backend
     runtime: docker
-    rootDir: backend
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: backend/Dockerfile
     envVars:
       - key: LLM_PROVIDER
         value: anthropic
