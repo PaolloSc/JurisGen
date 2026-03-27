@@ -568,20 +568,23 @@ Be concise. Respond in Portuguese."""
         loop = asyncio.get_running_loop()
         def _run():
             try:
-                # Resolve claude executable: use configured path first, then fallback locations
-                claude_exe = getattr(self, "claude_path", "claude")
-                if claude_exe == "claude" or not os.path.isabs(claude_exe):
-                    # Try common install locations before falling back to PATH lookup
-                    candidates = [
-                        "/usr/local/bin/claude",          # npm -g on Linux (Render)
-                        "/usr/bin/claude",
-                        os.path.join(os.path.expanduser("~"), ".local", "bin", "claude.exe"),  # Windows
+                # Resolve claude executable: shutil.which checks PATH correctly on
+                # both Windows (finds claude.cmd / claude.exe in %APPDATA%\npm)
+                # and Linux (finds /usr/local/bin/claude after npm -g install).
+                import shutil
+                claude_exe = shutil.which("claude") or shutil.which("claude.cmd")
+                if not claude_exe:
+                    # Last-resort hardcoded candidates
+                    for c in [
+                        "/usr/local/bin/claude",
+                        os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm", "claude.cmd"),
                         os.path.join(os.path.expanduser("~"), ".local", "bin", "claude"),
-                    ]
-                    for c in candidates:
+                    ]:
                         if os.path.exists(c):
                             claude_exe = c
                             break
+                if not claude_exe:
+                    raise FileNotFoundError("claude not found")
 
                 env = os.environ.copy()
                 env["TERM"] = "dumb"
