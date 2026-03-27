@@ -88,6 +88,104 @@ function Dot({ color, label }) {
   );
 }
 
+/* ════════════════════════ Refinement Bar ════════════════════════ */
+
+const REFINEMENT_CHIPS = [
+  { label: "Tornar mais formal", icon: "🎩" },
+  { label: "Expandir argumentos", icon: "📖" },
+  { label: "Resumir", icon: "✂️" },
+  { label: "Adicionar fundamentos legais", icon: "⚖️" },
+  { label: "Corrigir formatação", icon: "✏️" },
+  { label: "Reforçar os pedidos", icon: "🎯" },
+];
+
+function RefinementBar({ input, setInput }) {
+  const [showCustom, setShowCustom] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleChip = (label) => {
+    if (label === "__custom__") {
+      setShowCustom(true);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    } else {
+      setInput(label);
+      setShowCustom(true);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  };
+
+  return (
+    <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.015)", padding: "10px 20px 8px" }}>
+      {/* Chips row */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", maxWidth: 780, margin: "0 auto 8px", alignItems: "center" }}>
+        {REFINEMENT_CHIPS.map(({ label, icon }) => (
+          <button key={label} onClick={() => handleChip(label)}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 500,
+              background: input === label ? "rgba(167,139,250,0.18)" : "rgba(255,255,255,0.04)",
+              border: input === label ? "1px solid rgba(167,139,250,0.4)" : "1px solid rgba(255,255,255,0.08)",
+              color: input === label ? "#c4b5fd" : "rgba(255,255,255,0.55)",
+              cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+            }}
+            onMouseEnter={e => { if (input !== label) { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "#fff"; } }}
+            onMouseLeave={e => { if (input !== label) { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; } }}>
+            <span style={{ fontSize: 13 }}>{icon}</span>{label}
+          </button>
+        ))}
+        {/* "Outro" chip */}
+        <button onClick={() => handleChip("__custom__")}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 500,
+            background: showCustom && !REFINEMENT_CHIPS.some(c => c.label === input) ? "rgba(167,139,250,0.18)" : "rgba(255,255,255,0.04)",
+            border: showCustom && !REFINEMENT_CHIPS.some(c => c.label === input) ? "1px solid rgba(167,139,250,0.4)" : "1px dashed rgba(255,255,255,0.15)",
+            color: "rgba(255,255,255,0.45)", cursor: "pointer", transition: "all 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "#fff"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = showCustom && !REFINEMENT_CHIPS.some(c => c.label === input) ? "rgba(167,139,250,0.18)" : "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}>
+          <span style={{ fontSize: 13 }}>✍️</span>Outro...
+        </button>
+      </div>
+
+      {/* Custom text row — visible when a chip is selected or "Outro" is clicked */}
+      {showCustom && (
+        <div style={{ display: "flex", gap: 8, maxWidth: 780, margin: "0 auto" }}>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Escape") { setShowCustom(false); setInput(""); } }}
+            placeholder="Descreva o que deseja ajustar na minuta..."
+            style={{
+              flex: 1, padding: "9px 14px", borderRadius: 10,
+              border: "1px solid rgba(167,139,250,0.25)", background: "rgba(167,139,250,0.05)",
+              color: "#fff", fontSize: 13, outline: "none", fontFamily: "inherit",
+            }}
+          />
+          <button
+            disabled={!input.trim()}
+            style={{
+              padding: "9px 18px", borderRadius: 10, border: "none",
+              background: input.trim() ? "var(--accent)" : "rgba(255,255,255,0.05)",
+              color: "#fff", fontWeight: 700, fontSize: 13, cursor: input.trim() ? "pointer" : "default",
+            }}>
+            Refinar →
+          </button>
+          <button onClick={() => { setShowCustom(false); setInput(""); }}
+            style={{ padding: "9px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 13 }}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div style={{ textAlign: "center", fontSize: 10, color: "rgba(255,255,255,0.15)", marginTop: 6 }}>
+        JurisGen AI pode cometer erros. Nunca dispense a revisão humana final.
+      </div>
+    </div>
+  );
+}
+
 /* ════════════════════════ Reasoning Panel ════════════════════════ */
 
 const REASONING_SETS = {
@@ -1506,20 +1604,9 @@ export default function JurisGenApp() {
       {/* Verification popup */}
       {verifyPopup && <VerificationPopup source={verifyPopup.source} position={verifyPopup} onClose={() => setVerifyPopup(null)} />}
 
-      {/* Bottom chat */}
+      {/* Bottom refinement bar — Claude-style */}
       {stage === "document" && (
-        <div style={{ padding: "10px 20px", borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
-          <div style={{ display: "flex", gap: 8, maxWidth: 700, margin: "0 auto", alignItems: "center" }}>
-            <input value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") { /* handle chat */ } }}
-              placeholder="Instruções para melhoria da minuta..."
-              style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "#fff", fontSize: 13, outline: "none" }} />
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>Sem contexto</span>
-          </div>
-          <div style={{ textAlign: "center", fontSize: 10, color: "rgba(255,255,255,0.15)", marginTop: 4 }}>
-            JurisGen AI pode cometer erros. Nunca dispense a revisão humana final.
-          </div>
-        </div>
+        <RefinementBar input={input} setInput={setInput} />
       )}
 
       {/* Expandir controles */}
