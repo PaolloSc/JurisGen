@@ -13,10 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @anthropic-ai/claude-code
 
 # Install Python dependencies
-COPY requirements_minimal.txt .
+COPY backend/requirements_minimal.txt .
 RUN pip install --no-cache-dir -r requirements_minimal.txt
 
-COPY . .
+COPY backend/ .
 
 ENV PORT=8000
 
