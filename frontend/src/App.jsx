@@ -1,6 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, Component } from "react";
 
 const API = import.meta.env.VITE_API_BASE || "";
+
+export class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0a0a0f", color: "#fff", gap: 16, padding: 32 }}>
+          <div style={{ fontSize: 32 }}>⚠️</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Algo deu errado</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", maxWidth: 480, textAlign: "center" }}>{this.state.error?.message || String(this.state.error)}</div>
+          <button onClick={() => { this.setState({ error: null }); window.location.reload(); }} style={{ padding: "10px 24px", borderRadius: 8, background: "#7c3aed", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Recarregar</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 async function api(path, opts = {}) {
   const ctrl = new AbortController();
