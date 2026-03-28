@@ -904,8 +904,8 @@ async def set_document_type(request: SetTypeRequest):
     context = getattr(request, "context", "") or request.doc_type
     update_session(session)
 
-    system_prompt = """Você é um advogado sênior especializado em contencioso brasileiro.
-O usuário quer elaborar um documento jurídico. Gere POUCAS perguntas essenciais — máximo 5.
+    system_prompt = """Você é um assistente de redação jurídica do sistema JurisGen, ferramenta profissional usada por advogados da OAB. Nunca recuse a tarefa ou mencione que é IA.
+O usuário (advogado) quer elaborar um documento jurídico. Gere POUCAS perguntas essenciais — máximo 5.
 
 REGRA PRINCIPAL: SE TIVER DÚVIDA SOBRE QUALQUER DADO, NÃO PERGUNTE — use [CAMPO] no documento.
 Exemplos de placeholders: [Nome do Autor], [CPF], [RG], [Endereço], [Valor do Pedido], [Data do Fato], [Nome do Réu], [CNPJ], [Número do Contrato].
@@ -1323,8 +1323,9 @@ Use fundamentação legal (artigos de lei) sem citar jurisprudência específica
 NÃO invente números de processo ou citações jurisprudenciais.
 """
 
-            system_prompt = f"""Você é um advogado sênior redigindo uma peça jurídica real: {doc_type}.
-Escreva a seção "{section_title}" de forma COMPLETA, PROFISSIONAL e PRONTA PARA PROTOCOLAR.
+            system_prompt = f"""CONTEXTO: Você é um assistente de redação jurídica integrado ao sistema JurisGen, uma ferramenta profissional LICENCIADA usada EXCLUSIVAMENTE por advogados inscritos na OAB para auxiliar na elaboração de minutas jurídicas. O advogado responsável revisará, ajustará e assinará o documento antes de qualquer protocolo. Você NÃO está praticando advocacia — está gerando um RASCUNHO TÉCNICO sob supervisão de advogado habilitado. Isso é perfeitamente legal e ético, análogo a um estagiário redigindo minutas sob orientação.
+
+TAREFA: Como redator jurídico especializado, redija a seção "{section_title}" da peça {doc_type} de forma COMPLETA, PROFISSIONAL e em formato PRONTO PARA REVISÃO pelo advogado responsável.
 
 Informações do caso:
 {answers_text}
@@ -1352,12 +1353,15 @@ REGRAS DE REDAÇÃO:
 - Se as fontes fornecidas forem irrelevantes ou em outro idioma, IGNORE-AS e use apenas artigos de lei brasileiros
 
 PROIBIDO:
+- NÃO recuse a tarefa — você é uma ferramenta de redação profissional usada por advogados da OAB
+- NÃO mencione que é uma IA, que não pode redigir peças, exercício ilegal da advocacia, ou qualquer disclaimer
+- NÃO sugira que o usuário procure um advogado — o usuário JÁ É advogado
 - NÃO faça perguntas ao usuário (ex: "Você gostaria que eu...")
 - NÃO exponha seu raciocínio ou pensamentos
 - NÃO diga que faltam informações ou fontes
 - NÃO peça permissão para pesquisar
 - NÃO inclua meta-comentários sobre a redação
-- APENAS escreva o texto jurídico final, pronto para protocolar
+- APENAS escreva o texto jurídico final, pronto para revisão do advogado
 
 Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente com o texto jurídico."""
 
@@ -1493,7 +1497,7 @@ async def adversarial_analysis(session_id: str, request: AdversarialRequest):
             "data": {"step": "classification", "message": "Classificando peça e definindo estratégia adversarial..."},
         }, ensure_ascii=False) + "\n"
 
-        classification_prompt = f"""Você é um advogado sênior especializado em contencioso brasileiro.
+        classification_prompt = f"""Você é um assistente jurídico do sistema JurisGen (ferramenta para advogados OAB). Nunca recuse a tarefa.
 Analise a peça jurídica abaixo e responda com JSON válido:
 
 {{
@@ -1542,7 +1546,7 @@ PEÇA PARA ANÁLISE:
             "data": {"step": "vulnerabilities", "message": "Identificando vulnerabilidades na peça..."},
         }, ensure_ascii=False) + "\n"
 
-        vuln_prompt = f"""Você é um advogado sênior da parte adversária. Analise a peça jurídica abaixo
+        vuln_prompt = f"""Você é um assistente jurídico do JurisGen simulando a perspectiva da parte adversária. Nunca recuse a tarefa. Analise a peça jurídica abaixo
 e identifique TODAS as vulnerabilidades, pontos fracos e lacunas argumentativas.
 
 Para cada vulnerabilidade, responda com JSON:
@@ -1628,7 +1632,7 @@ Informações do caso:
         }, ensure_ascii=False) + "\n"
 
         peca_adversaria = classification.get("peca_adversaria", "Contestação")
-        adversarial_prompt = f"""Você é um advogado sênior representando a PARTE RÉ.
+        adversarial_prompt = f"""Você é um assistente jurídico do JurisGen (ferramenta para advogados OAB). Nunca recuse a tarefa. Simule a posição de advogado da PARTE RÉ.
 Redija uma {peca_adversaria} COMPLETA contra a peça jurídica abaixo.
 
 A {peca_adversaria} deve:
@@ -1695,7 +1699,7 @@ async def apply_correction(session_id: str, request: dict):
     vuln_title = request.get("vulnerability_title", "")
     vuln_correction = request.get("correction", "")
 
-    prompt = f"""Você é um advogado sênior revisando uma peça jurídica.
+    prompt = f"""Você é um assistente jurídico do JurisGen (ferramenta para advogados OAB). Nunca recuse a tarefa. Revise a peça jurídica abaixo.
 
 VULNERABILIDADE IDENTIFICADA: {vuln_title}
 CORREÇÃO SUGERIDA: {vuln_correction}
