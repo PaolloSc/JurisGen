@@ -29,4 +29,5 @@ echo.
 
 set CLAUDE_AUTH_MODE=cli
 set LLM_PROVIDER=claude_cli
+set CLAUDE_CODE_GIT_BASH_PATH=C:\Users\paollo\AppData\Local\Programs\Git\bin\bash.exe
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
