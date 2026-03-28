@@ -481,14 +481,23 @@ class LLMClient:
 
         results = {"claude": "", "jurema": None, "longcat": None}
 
-        jurema_prompt = f"""Você é o modelo Jurema, especialista em direito brasileiro.
-Com base nas fontes de jurisprudência fornecidas, gere APENAS citações jurisprudenciais formatadas
-para a seção "{section_title}". Para cada jurisprudência:
-1. Transcreva a ementa ou trecho relevante entre aspas
-2. Formate: (Tribunal, Tipo Nº Processo, Rel. Min./Des. Nome, j. DD/MM/AAAA)
-3. Explique brevemente a relevância para o caso
+        jurema_prompt = f"""Você é o modelo Jurema, especialista em jurisprudência brasileira.
+Para a seção "{section_title}", forneça jurisprudência ADICIONAL relevante no formato abaixo.
+Busque em sua base de conhecimento ementas REAIS de tribunais superiores (TST, STF, STJ, TRTs).
 
-Responda APENAS com as citações formatadas, sem texto adicional."""
+FORMATO OBRIGATÓRIO para cada jurisprudência:
+
+[Parágrafo introdutório contextualizando o ponto jurídico]
+
+EMENTA: [texto integral da ementa]
+(SIGLA nº NÚMERO, Relator(a): NOME, ÓRGÃO JULGADOR, julgado em DD-MM-AAAA, DJe DD-MM-AAAA)
+
+[Parágrafo de análise conectando ao caso]
+
+---
+
+Forneça entre 2 e 4 jurisprudências neste formato. NÃO invente — use apenas jurisprudência real.
+Responda APENAS com as citações formatadas, sem meta-comentários."""
 
         if self.ollama_jurema_enabled:
             # Local Ollama Jurema — no LongCat (only available on HF)

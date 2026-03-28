@@ -1371,7 +1371,7 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                     system=system_prompt,
                     user=user_msg,
                     section_title=section_title,
-                    max_tokens=4500,
+                    max_tokens=3000,
                 )
 
                 content = multi["claude"]
@@ -1397,14 +1397,12 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                 jurema_extra = multi.get("jurema", "")
                 longcat_extra = multi.get("longcat", "")
 
-                enrichments = []
+                # Integrar jurisprudência da Jurema diretamente no corpo do texto
                 if _is_valid_legal_pt(jurema_extra):
-                    enrichments.append(jurema_extra)
+                    content += "\n\n" + jurema_extra
+                # LongCat adiciona validação/complemento legal
                 if _is_valid_legal_pt(longcat_extra):
-                    enrichments.append(longcat_extra)
-
-                if enrichments:
-                    content += "\n\n" + "\n\n".join(enrichments)
+                    content += "\n\n" + longcat_extra
 
                 # Clean Claude output: remove "thinking" leaks
                 import re as _re

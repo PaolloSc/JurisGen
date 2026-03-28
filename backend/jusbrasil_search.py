@@ -206,56 +206,66 @@ class JusBrasilSearch:
                     seen_urls.add(url_base)
                     links_unicos.append((url, titulo))
 
-            print(f"📋 Encontrados {len(links_unicos)} resultados. Extraindo ementas formatadas...")
+            print(f"📋 Encontrados {len(links_unicos)} resultados. Extraindo ementas em paralelo...")
 
-            # Entrar em cada processo e extrair a ementa formatada
-            for url_processo, titulo in links_unicos[:limite]:
-                time.sleep(0.5)  # Rate limiting
+            # Extrair ementas em paralelo com ThreadPool para velocidade
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                ementa_data = self._extrair_ementa_formatada(url_processo)
+            links_para_extrair = links_unicos[:limite]
 
-                if ementa_data:
-                    # Montar referência formatada a partir dos metadados
-                    meta = ementa_data.get("metadados", {})
-                    ref_parts = []
-                    if meta.get("número"):
-                        ref_parts.append(meta["número"])
-                    if meta.get("relator"):
-                        ref_parts.append(f"Relator(a): {meta['relator']}")
-                    if meta.get("órgão julgador"):
-                        ref_parts.append(meta["órgão julgador"])
-                    if meta.get("data de julgamento"):
-                        ref_parts.append(f"julgado em {meta['data de julgamento']}")
-                    if meta.get("data de publicação"):
-                        ref_parts.append(f"PUBLIC {meta['data de publicação']}")
+            def _extrair_com_titulo(args):
+                url, titulo = args
+                return titulo, url, self._extrair_ementa_formatada(url)
 
-                    referencia_formatada = ", ".join(ref_parts) if ref_parts else ementa_data.get("referencia", "")
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {executor.submit(_extrair_com_titulo, item): item for item in links_para_extrair}
+                for future in as_completed(futures):
+                    try:
+                        titulo, url_processo, ementa_data = future.result()
+                    except Exception:
+                        continue
 
-                    resultados.append({
-                        "tipo": "Jurisprudência/Súmula",
-                        "texto": ementa_data["ementa"],
-                        "ementa": ementa_data["ementa"],
-                        "referencia_formatada": f"({referencia_formatada})",
-                        "titulo": ementa_data.get("titulo", titulo),
-                        "fonte": "JusBrasil",
-                        "url": url_processo,
-                        "data_busca": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "tribunal": tribunal,
-                        "termo_busca": termo_busca
-                    })
-                    print(f"  ✅ Ementa extraída: {titulo[:60]}...")
-                else:
-                    # Fallback: usar texto do resultado da busca
-                    resultados.append({
-                        "tipo": "Jurisprudência/Súmula",
-                        "texto": titulo,
-                        "fonte": "JusBrasil - Search",
-                        "url": url_processo,
-                        "data_busca": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "tribunal": tribunal,
-                        "termo_busca": termo_busca
-                    })
-                    print(f"  ⚠️ Fallback (sem ementa): {titulo[:60]}...")
+                    if ementa_data:
+                        meta = ementa_data.get("metadados", {})
+                        ref_parts = []
+                        if meta.get("número"):
+                            ref_parts.append(meta["número"])
+                        if meta.get("relator"):
+                            ref_parts.append(f"Relator(a): {meta['relator']}")
+                        if meta.get("órgão julgador"):
+                            ref_parts.append(meta["órgão julgador"])
+                        if meta.get("data de julgamento"):
+                            ref_parts.append(f"julgado em {meta['data de julgamento']}")
+                        if meta.get("data de publicação"):
+                            ref_parts.append(f"PUBLIC {meta['data de publicação']}")
+
+                        referencia_formatada = ", ".join(ref_parts) if ref_parts else ementa_data.get("referencia", "")
+
+                        resultados.append({
+                            "tipo": "Jurisprudência/Súmula",
+                            "texto": ementa_data["ementa"],
+                            "ementa": ementa_data["ementa"],
+                            "referencia_formatada": f"({referencia_formatada})",
+                            "titulo": ementa_data.get("titulo", titulo),
+                            "fonte": "JusBrasil",
+                            "url": url_processo,
+                            "data_busca": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "tribunal": tribunal,
+                            "termo_busca": termo_busca
+                        })
+                        print(f"  ✅ Ementa extraída: {titulo[:60]}...")
+                    else:
+                        # Fallback: usar texto do resultado da busca
+                        resultados.append({
+                            "tipo": "Jurisprudência/Súmula",
+                            "texto": titulo,
+                            "fonte": "JusBrasil - Search",
+                            "url": url_processo,
+                            "data_busca": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "tribunal": tribunal,
+                            "termo_busca": termo_busca
+                        })
+                        print(f"  ⚠️ Fallback (sem ementa): {titulo[:60]}...")
 
             print(f"✅ {len(resultados)} jurisprudências processadas")
             return resultados
