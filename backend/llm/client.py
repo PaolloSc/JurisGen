@@ -481,22 +481,26 @@ class LLMClient:
 
         results = {"claude": "", "jurema": None, "longcat": None}
 
-        jurema_prompt = f"""Você é o modelo Jurema, especialista em jurisprudência brasileira.
-Para a seção "{section_title}", forneça jurisprudência ADICIONAL relevante no formato abaixo.
-Busque em sua base de conhecimento ementas REAIS de tribunais superiores (TST, STF, STJ, TRTs).
+        jurema_prompt = f"""Você é o modelo Jurema, especialista em jurisprudência e legislação brasileira.
+Para a seção "{section_title}", forneça fundamentação jurídica ADICIONAL relevante.
 
-FORMATO OBRIGATÓRIO para cada jurisprudência:
+FORMATO OBRIGATÓRIO — transcreva SEMPRE o texto integral:
 
-[Parágrafo introdutório contextualizando o ponto jurídico]
+1. SÚMULAS — transcreva o enunciado completo:
+   Súmula nº XXX do TST/STF/STJ: "[texto integral do enunciado]"
+   [1 frase conectando ao caso]
 
-EMENTA: [texto integral da ementa]
-(SIGLA nº NÚMERO, Relator(a): NOME, ÓRGÃO JULGADOR, julgado em DD-MM-AAAA, DJe DD-MM-AAAA)
+2. ARTIGOS DE LEI — transcreva o dispositivo literal:
+   Art. XXX da CLT/CC/CF: "[texto integral do artigo com alíneas/incisos]"
+   [1 frase conectando ao caso]
 
-[Parágrafo de análise conectando ao caso]
+3. JURISPRUDÊNCIA — transcreva a ementa completa:
+   EMENTA: [texto integral da ementa]
+   (SIGLA nº NÚMERO, Relator(a): NOME, ÓRGÃO JULGADOR, julgado em DD-MM-AAAA, DJe DD-MM-AAAA)
+   [1 frase conectando ao caso]
 
----
-
-Forneça entre 2 e 4 jurisprudências neste formato. NÃO invente — use apenas jurisprudência real.
+REGRA: NUNCA parafrase — SEMPRE transcreva o texto literal da súmula/artigo/ementa.
+Forneça entre 2 e 4 citações neste formato. NÃO invente — use apenas fontes reais.
 Responda APENAS com as citações formatadas, sem meta-comentários."""
 
         if self.ollama_jurema_enabled:
