@@ -1338,14 +1338,23 @@ Fundamentação legal sugerida: {basis_text}
 REGRAS DE REDAÇÃO:
 - Use linguagem jurídica formal brasileira
 - PRIORIDADE DE CITAÇÃO: jurisprudência > súmulas > doutrina > artigos de lei
-- Cada seção substantiva DEVE ter no mínimo 3 blocos de jurisprudência no formato: parágrafo introdutório → EMENTA em bloco recuado → referência completa entre parênteses → parágrafo de análise
-- Transcreva SEMPRE a ementa COMPLETA em bloco indentado, iniciando com "EMENTA:" — nunca resuma ou use reticências (...) dentro da ementa
-- A referência após a ementa DEVE conter: sigla do recurso, número, relator, órgão julgador, data de julgamento, dados de publicação (DJe, DIVULG, PUBLIC)
-- Cada ementa deve ser precedida de parágrafo contextualizando o ponto jurídico e seguida de análise conectando ao caso concreto
-- Artigos de lei são suporte — ementas transcritas na íntegra são o argumento central
+
+REGRA CRÍTICA — TRANSCRIÇÃO OBRIGATÓRIA DE SÚMULAS E ARTIGOS:
+- Ao citar uma SÚMULA, TRANSCREVA O TEXTO INTEGRAL DO ENUNCIADO. Exemplo correto:
+  "Súmula nº 212 do TST: O ônus de provar o término do contrato de trabalho, quando negados a prestação de serviço e o despedimento, é do empregador, pois o princípio da continuidade da relação de emprego constitui presunção favorável ao empregado."
+  ERRADO: "A Súmula 212 do TST estabelece que o ônus da prova..." (isso é paráfrase, não transcrição)
+
+- Ao citar um ARTIGO DE LEI, TRANSCREVA O TEXTO LITERAL DO DISPOSITIVO. Exemplo correto:
+  "Art. 482 da CLT: Constituem justa causa para rescisão do contrato de trabalho pelo empregador: a) ato de improbidade; b) incontinência de conduta ou mau procedimento; c) negociação habitual..."
+  ERRADO: "O artigo 482 da CLT prevê as hipóteses de justa causa..." (isso é paráfrase, não transcrição)
+
+- Ao citar JURISPRUDÊNCIA, transcreva a EMENTA COMPLETA em bloco recuado iniciando com "EMENTA:", seguida da referência completa entre parênteses
+
+- Cada seção substantiva DEVE ter no mínimo 3 citações com texto TRANSCRITO (súmulas, artigos ou ementas)
+- Após cada transcrição, adicione 1-2 frases de análise conectando ao caso concreto
 - Seja detalhista e extenso — esta seção será usada diretamente na peça
 - Para fatos: narrativa cronológica detalhada com os dados fornecidos
-- Para direito: parágrafo introdutório → EMENTA em bloco recuado → referência completa (RE/REsp/RR nº, Relator, Órgão, data, DJe) → análise aplicada ao caso + artigo de lei como complemento
+- Para direito: transcrição integral de súmulas + artigos de lei + ementas com referência completa + análise aplicada ao caso
 - Para pedidos: lista enumerada e específica
 - Use os dados reais fornecidos pelo usuário
 - Para dados NÃO informados, use placeholders: [Nome Completo], [CPF], [RG], [Endereço], etc.
