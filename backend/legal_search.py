@@ -298,8 +298,8 @@ async def search_section_sources(
     section_description: str,
     case_context: str,
     doc_type: str = "",
-    max_juris: int = 8,
-    max_doutrina: int = 2,
+    max_juris: int = 5,
+    max_doutrina: int = 1,
 ) -> dict[str, Any]:
     """
     Busca fontes específicas para UMA seção do documento.
@@ -325,9 +325,9 @@ async def search_section_sources(
         tribunais = _pick_tribunais(doc_type)
 
         # Run all searches in parallel
-        datajud_task = search_datajud(topic, tribunais=tribunais, max_per_tribunal=3)
+        datajud_task = search_datajud(topic, tribunais=tribunais, max_per_tribunal=2)
         ddg_task = search_duckduckgo_jurisprudencia(topic, case_context, max_results=max_juris)
-        jb_task = search_jusbrasil_jurisprudencia(topic, max_results=max_juris)
+        jb_task = search_jusbrasil_jurisprudencia(topic, max_results=3)
         doutrina_task = search_doutrina_targeted(topic, max_results=max_doutrina)
 
         datajud_results, ddg_results, jb_results, doutrina_results = await asyncio.gather(

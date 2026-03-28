@@ -1232,41 +1232,78 @@ async def generate_document(session_id: str):
         all_sources_global = []
         global_source_idx = 1
 
+        # ── FASE 1: Pesquisar TODAS as seções em PARALELO ──
+        # Identifica quais seções precisam de pesquisa
+        skip_keywords = {
+            "qualificação", "partes", "encerramento", "requerimentos finais",
+            "fechamento", "assinatura", "endereçamento", "pedidos", "valor da causa",
+        }
+
+        search_tasks = {}
+        for i, sec in enumerate(sections):
+            section_title = sec.get("title", f"Seção {i+1}")
+            section_desc = sec.get("description", "")
+            needs_research = not any(skip in section_title.lower() for skip in skip_keywords)
+
+            if needs_research:
+                search_tasks[i] = search_section_sources(
+                    section_title=section_title,
+                    section_description=section_desc,
+                    case_context=case_context,
+                    doc_type=doc_type,
+                )
+
+        # Notificar frontend que pesquisa começou
+        yield _json.dumps({
+            "type": "research",
+            "data": {
+                "section": "Todas as seções",
+                "status": "searching",
+                "message": f"Pesquisando jurisprudência para {len(search_tasks)} seções em paralelo...",
+            },
+        }, ensure_ascii=False) + "\n"
+
+        # Executar todas as pesquisas em paralelo
+        search_results = {}
+        if search_tasks:
+            task_items = list(search_tasks.items())
+            results = await asyncio.gather(
+                *[task for _, task in task_items],
+                return_exceptions=True,
+            )
+            for (idx, _), result in zip(task_items, results):
+                if isinstance(result, Exception):
+                    search_results[idx] = {"jurisprudencia": [], "doutrina": [], "all_sources": []}
+                else:
+                    search_results[idx] = result
+
+        yield _json.dumps({
+            "type": "research",
+            "data": {
+                "section": "Todas as seções",
+                "status": "done",
+                "message": f"Pesquisa concluída — gerando texto das seções...",
+            },
+        }, ensure_ascii=False) + "\n"
+
+        # ── FASE 2: Gerar texto de cada seção (sequencial por causa do streaming) ──
         for i, sec in enumerate(sections):
             section_title = sec.get("title", f"Seção {i+1}")
             section_desc = sec.get("description", "")
             legal_basis = sec.get("legal_basis", [])
             basis_text = ", ".join(legal_basis) if legal_basis else "conforme legislação aplicável"
 
-            # ── Per-section targeted search ──
-            yield _json.dumps({
-                "type": "research",
-                "data": {
-                    "section": section_title,
-                    "status": "searching",
-                    "message": f"Pesquisando jurisprudência e doutrina para: {section_title}...",
-                },
-            }, ensure_ascii=False) + "\n"
+            # Usar resultado da pesquisa (ou vazio se seção simples)
+            section_sources = search_results.get(i, {"jurisprudencia": [], "doutrina": [], "all_sources": []})
+            sources_text = format_section_sources(section_sources) if section_sources.get("all_sources") else ""
 
-            try:
-                section_sources = await search_section_sources(
-                    section_title=section_title,
-                    section_description=section_desc,
-                    case_context=case_context,
-                    doc_type=doc_type,
-                )
-                sources_text = format_section_sources(section_sources)
-                # Tag each source with its section for the global block
-                for src in section_sources.get("all_sources", []):
-                    src["section"] = section_title
-                    src["global_idx"] = global_source_idx
-                    all_sources_global.append(src)
-                    global_source_idx += 1
-            except Exception:
-                section_sources = {"jurisprudencia": [], "doutrina": [], "all_sources": []}
-                sources_text = ""
+            # Tag sources for global block
+            for src in section_sources.get("all_sources", []):
+                src["section"] = section_title
+                src["global_idx"] = global_source_idx
+                all_sources_global.append(src)
+                global_source_idx += 1
 
-            # Notify frontend how many sources found for this section
             n_found = len(section_sources.get("all_sources", []))
             tribunais = section_sources.get("tribunais_consultados", [])
             search_query = section_sources.get("search_query", "")
@@ -1374,14 +1411,28 @@ PROIBIDO:
 
 Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente com o texto jurídico."""
 
+            # Seções simples: prompt menor, menos tokens, sem Jurema
+            is_simple = any(skip in section_title.lower() for skip in skip_keywords)
+
             try:
                 user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
-                multi = await llm.chat_multi(
-                    system=system_prompt,
-                    user=user_msg,
-                    section_title=section_title,
-                    max_tokens=3000,
-                )
+                section_max_tokens = 1200 if is_simple else 3000
+
+                if is_simple:
+                    # Seções simples: só Claude, sem Jurema/LongCat (mais rápido)
+                    content = await llm.chat(
+                        system=system_prompt,
+                        user=user_msg,
+                        max_tokens=section_max_tokens,
+                    )
+                    multi = {"claude": content}
+                else:
+                    multi = await llm.chat_multi(
+                        system=system_prompt,
+                        user=user_msg,
+                        section_title=section_title,
+                        max_tokens=section_max_tokens,
+                    )
 
                 content = multi["claude"]
 
