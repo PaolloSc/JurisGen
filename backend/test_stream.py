@@ -1,9 +1,9 @@
-import asyncio, httpx, json
+import asyncio, httpx, json, time
 
 
 async def test_generate():
     api_base = "https://jurisgen.onrender.com"
-    async with httpx.AsyncClient(timeout=45) as client:
+    async with httpx.AsyncClient(timeout=120.0, read_timeout=120.0) as client:
         # 1. Create session
         r = await client.post(f"{api_base}/api/sessions", json={})
         print("Create session:", r.status_code)
