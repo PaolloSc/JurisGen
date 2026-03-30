@@ -515,8 +515,9 @@ class LLMClient:
                 return await self._chat_claude_cli(system, user, json_mode)
             except Exception as e:
                 error_str = str(e).lower()
+                # Only fall back on usage-limit errors; auth errors must surface so the
+                # user knows to run `claude login`.
                 if "limit" in error_str or "resets" in error_str:
-                    # Claude CLI hit usage limit — fall back to Maritaca if available
                     if os.getenv("MARITACA_API_KEY"):
                         print(
                             f"[Claude CLI] Uso limitado. Fazendo fallback para sabia-4 (Maritaca)..."
@@ -1166,10 +1167,21 @@ Be concise. Respond in Portuguese."""
 
 
 def _make_sabia_client() -> "LLMClient":
-    """sabia-4 (Maritaca) — redige seções com pesquisa ativa de jurisprudência."""
+    """Escolhe provider para geração de seções.
+
+    Prioridade:
+    1. CLAUDE_AUTH_MODE=cli  → Claude CLI (assinatura Pro/Max)
+    2. ANTHROPIC_API_KEY     → Anthropic API direta
+    3. MARITACA_API_KEY      → sabia-4 (Maritaca)
+    4. fallback              → maritaca (erro claro de chave ausente)
+    """
+    if os.getenv("CLAUDE_AUTH_MODE") == "cli":
+        return LLMClient(force_provider="claude_cli")
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return LLMClient(force_provider="anthropic")
     if os.getenv("MARITACA_API_KEY"):
         return LLMClient(force_provider="maritaca")
-    return LLMClient()  # fallback to env-configured provider
+    return LLMClient(force_provider="maritaca")
 
 
 def _make_orchestrator() -> "LLMClient":
