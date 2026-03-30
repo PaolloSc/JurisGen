@@ -748,19 +748,33 @@ Be concise. Respond in Portuguese."""
                 env["NO_COLOR"] = "1"
                 env["CI"] = "1"
 
-                # ── Resolve HOME (Windows may use USERPROFILE instead of HOME) ──
-                home_dir = (
-                    env.get("HOME")
-                    or env.get("USERPROFILE")
-                    or os.path.expanduser("~")
-                )
+                # ── Resolve HOME and credential directory ──
+                # On Windows, HOME may point to a network drive (W:\) while
+                # Claude CLI credentials live under USERPROFILE (C:\Users\...).
+                # We search all candidate base dirs in priority order.
+                _candidate_bases = [
+                    env.get("USERPROFILE"),   # Windows: C:\Users\paollo
+                    env.get("HOME"),           # may be network drive – check last
+                    os.path.expanduser("~"),
+                ]
+                home_dir = next(
+                    (p for p in _candidate_bases if p and os.path.isdir(p)), ""
+                ) or os.path.expanduser("~")
                 env["HOME"] = home_dir
 
                 # ── Point Claude CLI to its config/credential directory ──
                 if "CLAUDE_CONFIG_DIR" not in env:
-                    claude_home = os.path.join(home_dir, ".claude")
-                    if os.path.isdir(claude_home):
-                        env["CLAUDE_CONFIG_DIR"] = claude_home
+                    # Search all candidate bases for a .claude directory with credentials
+                    for base in _candidate_bases:
+                        if not base:
+                            continue
+                        candidate = os.path.join(base, ".claude")
+                        if os.path.isdir(candidate) and os.path.exists(
+                            os.path.join(candidate, ".credentials.json")
+                        ):
+                            env["CLAUDE_CONFIG_DIR"] = candidate
+                            env["HOME"] = base  # align HOME with the credentials location
+                            break
 
                 # ── API-key auth (for Render / CI environments) ──
                 # If ANTHROPIC_API_KEY is available and not already forwarded,
