@@ -1775,6 +1775,9 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             models_used = []
 
             try:
+                import time as _time
+
+                _t0 = _time.time()
                 user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
                 section_max_tokens = 800 if is_simple else 1800
 
@@ -1798,6 +1801,10 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                     multi = {"claude": content or ""}
 
                 content = multi.get("claude", "")
+                _elapsed = _time.time() - _t0
+                print(
+                    f"[stream_sections] Secao '{section_title}' gerada em {_elapsed:.1f}s, content_len={len(content)}"
+                )
 
                 jurema_extra = multi.get("jurema", "")
                 longcat_extra = multi.get("longcat", "")
@@ -1854,6 +1861,7 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             }
             yield _json.dumps(event, ensure_ascii=False) + "\n"
             await asyncio.sleep(0)  # Flush chunk to client
+            print(f"[stream_sections] Secao '{section_title}' EMITIDA")
 
         except Exception as e:
             # Erro crítico na geração — emite evento de erro para o frontend
