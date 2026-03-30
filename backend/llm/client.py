@@ -532,7 +532,9 @@ class LLMClient:
                             f"[Claude CLI] Erro ({str(e)[:80]}). "
                             f"Fallback automático → sabia-4 (Maritaca)."
                         )
-                        return await self._chat_openai(
+                        # Create a proper Maritaca client (self.client is None for claude_cli)
+                        _fallback = LLMClient(force_provider="maritaca")
+                        return await _fallback._chat_openai(
                             system, user, temperature, max_tokens
                         )
                     elif os.getenv("ANTHROPIC_API_KEY"):
@@ -540,7 +542,9 @@ class LLMClient:
                             f"[Claude CLI] Erro ({str(e)[:80]}). "
                             f"Fallback automático → Anthropic API."
                         )
-                        return await self._chat_anthropic(
+                        # Create a proper Anthropic client (not set up for claude_cli)
+                        _fallback = LLMClient(force_provider="anthropic")
+                        return await _fallback._chat_anthropic(
                             system, user, temperature, max_tokens
                         )
                 raise
