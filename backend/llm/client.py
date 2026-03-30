@@ -244,10 +244,11 @@ class _EOFRetryError(Exception):
 
 
 class LLMClient:
-    def __init__(self):
-        # Allow choosing between maritaca, ollama, or claude_cli
-        # Defaulting to claude_cli if CLAUDE_AUTH_MODE=cli is found
-        if os.getenv("CLAUDE_AUTH_MODE") == "cli":
+    def __init__(self, force_provider: str | None = None):
+        # force_provider overrides all env vars (for dual-client setup)
+        if force_provider:
+            self.provider = force_provider
+        elif os.getenv("CLAUDE_AUTH_MODE") == "cli":
             self.provider = "claude_cli"
         else:
             self.provider = os.getenv("LLM_PROVIDER", "maritaca")
@@ -267,6 +268,7 @@ class LLMClient:
             self.model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-6")
             self.client = None
         else:
+            # maritaca (default) — sabia-4 via OpenAI-compatible endpoint
             self.client = AsyncOpenAI(
                 base_url=os.getenv("MARITACA_BASE_URL", "https://chat.maritaca.ai/api"),
                 api_key=os.getenv("MARITACA_API_KEY", ""),
@@ -753,4 +755,219 @@ Be concise. Respond in Portuguese."""
                 yield delta
 
 
+    # ── Tool calling (sabia-4 pesquisa jurisprudência ativamente) ────────────
+
+    async def chat_with_tools(
+        self,
+        system: str,
+        user: str,
+        tools: list[dict],
+        tool_executor,          # async callable(name, args) -> str
+        temperature: float = 0.3,
+        max_tokens: int = 3000,
+        max_tool_rounds: int = 3,
+    ) -> str:
+        """
+        Executa um loop de tool calling com sabia-4 (ou qualquer provider OpenAI-compat).
+        sabia-4 pode chamar as ferramentas definidas em `tools` para pesquisar
+        jurisprudências e doutrinas antes de redigir o texto final.
+        Funciona apenas com providers OpenAI-compatíveis (maritaca, ollama).
+        """
+        if self.provider not in ("maritaca", "ollama"):
+            # Providers sem tool calling nativo: executa tools uma vez e injeta resultado
+            tool_results = []
+            for tool in tools[:2]:
+                fn = tool.get("function", {})
+                # Usa parâmetros padrão do schema (required fields com descrição)
+                props = fn.get("parameters", {}).get("properties", {})
+                default_args = {k: v.get("description", k) for k, v in props.items()
+                                if k in fn.get("parameters", {}).get("required", [])}
+                try:
+                    result = await tool_executor(fn.get("name", ""), default_args)
+                    tool_results.append(f"[{fn.get('name','')}]: {result[:600]}")
+                except Exception:
+                    pass
+            enriched_user = user
+            if tool_results:
+                enriched_user = user + "\n\n=== FONTES PESQUISADAS ===\n" + "\n\n".join(tool_results)
+            return await self.chat(system=system, user=enriched_user, temperature=temperature, max_tokens=max_tokens)
+
+        # OpenAI-compatible tool calling loop
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        openai_tools = [{"type": "function", "function": t["function"]} for t in tools]
+
+        for _ in range(max_tool_rounds):
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=openai_tools,
+                tool_choice="auto",
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            choice = response.choices[0]
+            msg = choice.message
+
+            # Append assistant turn
+            messages.append(msg.model_dump(exclude_none=True))
+
+            # If no tool calls, we're done
+            if not msg.tool_calls:
+                return msg.content or ""
+
+            # Execute each tool call
+            for tc in msg.tool_calls:
+                fn_name = tc.function.name
+                try:
+                    fn_args = json.loads(tc.function.arguments)
+                except Exception:
+                    fn_args = {}
+                try:
+                    result_text = await tool_executor(fn_name, fn_args)
+                except Exception as e:
+                    result_text = f"Erro ao executar {fn_name}: {e}"
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result_text,
+                })
+
+        # Final generation after all tool rounds
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content or ""
+
+    async def gerar_secao_com_pesquisa(
+        self,
+        system: str,
+        user: str,
+        section_title: str = "",
+        doc_type: str = "",
+        temperature: float = 0.3,
+        max_tokens: int = 3000,
+    ) -> str:
+        """
+        sabia-4 redige uma seção e pesquisa ativamente jurisprudências e doutrinas
+        usando tool calling. Retorna apenas o texto final da seção.
+        """
+        # Tool definitions para busca jurídica
+        tools = [
+            {
+                "function": {
+                    "name": "buscar_jurisprudencia",
+                    "description": (
+                        "Busca jurisprudências, ementas e acórdãos reais nos tribunais brasileiros "
+                        "(TST, STJ, STF, TRTs, TJs). Use para encontrar decisões reais que fundamentam a seção."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "tema": {
+                                "type": "string",
+                                "description": "Tema jurídico a pesquisar (ex: 'horas extras adicional noturno TST')",
+                            },
+                            "tribunais": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Tribunais prioritários: TST, STJ, STF, TJSP, TJMG, TRT3",
+                            },
+                        },
+                        "required": ["tema"],
+                    },
+                }
+            },
+            {
+                "function": {
+                    "name": "buscar_doutrina",
+                    "description": (
+                        "Busca doutrina e artigos jurídicos em fontes como ConJur e Migalhas. "
+                        "Use para complementar a fundamentação com posições doutrinárias."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "tema": {
+                                "type": "string",
+                                "description": "Tema doutrinário a pesquisar",
+                            },
+                        },
+                        "required": ["tema"],
+                    },
+                }
+            },
+        ]
+
+        async def tool_executor(name: str, args: dict) -> str:
+            try:
+                from legal_search import (
+                    search_datajud,
+                    search_duckduckgo_jurisprudencia,
+                    search_doutrina_targeted,
+                    format_section_sources,
+                    _pick_tribunais,
+                )
+                if name == "buscar_jurisprudencia":
+                    tema = args.get("tema", section_title)
+                    tribunais = args.get("tribunais") or _pick_tribunais(doc_type)
+                    datajud, ddg = await asyncio.gather(
+                        search_datajud(tema, tribunais=tribunais, max_per_tribunal=3),
+                        search_duckduckgo_jurisprudencia(tema, max_results=4),
+                        return_exceptions=True,
+                    )
+                    results = []
+                    if isinstance(datajud, list): results.extend(datajud)
+                    if isinstance(ddg, list): results.extend(ddg)
+                    return format_section_sources({"jurisprudencia": results[:5], "doutrina": [], "all_sources": results[:5]})
+
+                elif name == "buscar_doutrina":
+                    tema = args.get("tema", section_title)
+                    doutrina = await search_doutrina_targeted(tema, max_results=3)
+                    if isinstance(doutrina, Exception): doutrina = []
+                    return format_section_sources({"jurisprudencia": [], "doutrina": doutrina, "all_sources": doutrina})
+
+            except Exception as e:
+                return f"Busca indisponível: {e}"
+            return "Nenhum resultado encontrado."
+
+        return await self.chat_with_tools(
+            system=system,
+            user=user,
+            tools=tools,
+            tool_executor=tool_executor,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+
+# ── Instâncias globais ────────────────────────────────────────────────────────
+
+def _make_sabia_client() -> "LLMClient":
+    """sabia-4 (Maritaca) — redige seções com pesquisa ativa de jurisprudência."""
+    if os.getenv("MARITACA_API_KEY"):
+        return LLMClient(force_provider="maritaca")
+    return LLMClient()  # fallback to env-configured provider
+
+
+def _make_orchestrator() -> "LLMClient":
+    """Claude — orquestra perguntas, classifica tipo de peça e gera outline."""
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return LLMClient(force_provider="anthropic")
+    return LLMClient(force_provider="claude_cli")
+
+
+# Mantém compatibilidade com código existente
 llm_client = LLMClient()
+
+# sabia-4: pesquisa jurisprudência e redige as seções
+sabia_client = _make_sabia_client()
+
+# Claude: orquestra perguntas e estrutura o documento
+orchestrator_client = _make_orchestrator()

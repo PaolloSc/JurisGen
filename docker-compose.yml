@@ -12,6 +12,10 @@ services:
       - JUREMA_PROVIDER=ollama
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - JUREMA_OLLAMA_MODEL=jurema
+      # sabia-4 (Maritaca) — pesquisa jurisprudência e redige seções
+      # Configure MARITACA_API_KEY no arquivo backend/.env
+      - MARITACA_BASE_URL=https://chat.maritaca.ai/api
+      - MARITACA_MODEL=sabia-4
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
