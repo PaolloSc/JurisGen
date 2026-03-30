@@ -1625,243 +1625,243 @@ async def generate_document(session_id: str):
         try:
             for i, sec in enumerate(sections):
                 section_title = sec.get("title", f"Seção {i + 1}")
-            section_desc = sec.get("description", "")
-            legal_basis = sec.get("legal_basis", [])
-            basis_text = (
-                ", ".join(legal_basis)
-                if legal_basis
-                else "conforme legislação aplicável"
-            )
+                section_desc = sec.get("description", "")
+                legal_basis = sec.get("legal_basis", [])
+                basis_text = (
+                    ", ".join(legal_basis)
+                    if legal_basis
+                    else "conforme legislação aplicável"
+                )
 
-            # Usar resultado da pesquisa (ou vazio se seção simples)
-            section_sources = search_results.get(
-                i, {"jurisprudencia": [], "doutrina": [], "all_sources": []}
-            )
-            sources_text = (
-                format_section_sources(section_sources)
-                if section_sources.get("all_sources")
-                else ""
-            )
+                # Usar resultado da pesquisa (ou vazio se seção simples)
+                section_sources = search_results.get(
+                    i, {"jurisprudencia": [], "doutrina": [], "all_sources": []}
+                )
+                sources_text = (
+                    format_section_sources(section_sources)
+                    if section_sources.get("all_sources")
+                    else ""
+                )
 
-            # Tag sources for global block
-            for src in section_sources.get("all_sources", []):
-                src["section"] = section_title
-                src["global_idx"] = global_source_idx
-                all_sources_global.append(src)
-                global_source_idx += 1
+                # Tag sources for global block
+                for src in section_sources.get("all_sources", []):
+                    src["section"] = section_title
+                    src["global_idx"] = global_source_idx
+                    all_sources_global.append(src)
+                    global_source_idx += 1
 
-            n_found = len(section_sources.get("all_sources", []))
-            tribunais = section_sources.get("tribunais_consultados", [])
-            search_query = section_sources.get("search_query", "")
-            yield (
-                _json.dumps(
-                    {
-                        "type": "research",
-                        "data": {
-                            "section": section_title,
-                            "status": "done",
-                            "total": n_found,
-                            "sources": section_sources.get("all_sources", []),
-                            "tribunais": tribunais,
-                            "search_query": search_query,
-                            "message": f"{n_found} fontes encontradas para {section_title}",
+                n_found = len(section_sources.get("all_sources", []))
+                tribunais = section_sources.get("tribunais_consultados", [])
+                search_query = section_sources.get("search_query", "")
+                yield (
+                    _json.dumps(
+                        {
+                            "type": "research",
+                            "data": {
+                                "section": section_title,
+                                "status": "done",
+                                "total": n_found,
+                                "sources": section_sources.get("all_sources", []),
+                                "tribunais": tribunais,
+                                "search_query": search_query,
+                                "message": f"{n_found} fontes encontradas para {section_title}",
+                            },
                         },
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-            await asyncio.sleep(0)  # Yield control to flush chunk to client
-
-            # ── Build per-section prompt with its own sources ──
-            n_juris = len(section_sources.get("jurisprudencia", []))
-            sources_instruction = ""
-            if sources_text:
-                sources_instruction = f"""
-══════════════════════════════════════════════
-FONTES PESQUISADAS ESPECIFICAMENTE PARA ESTA SEÇÃO:
-{sources_text}
-══════════════════════════════════════════════
-
-INSTRUÇÕES DE CITAÇÃO — PRIORIDADE ABSOLUTA:
-1. JURISPRUDÊNCIA TEM PRIORIDADE MÁXIMA. Foram encontradas {n_juris} jurisprudências acima.
-2. Você DEVE citar TODAS as {n_juris} jurisprudências, incorporando cada uma no corpo do texto.
-3. FORMATO OBRIGATÓRIO DE CITAÇÃO DE JURISPRUDÊNCIA — siga EXATAMENTE este modelo:
-
-   a) Primeiro, escreva um parágrafo introdutório contextualizando o ponto jurídico e apresentando a posição da jurisprudência sobre o tema. Exemplo:
-      "A jurisprudência da Suprema Corte é firme no sentido de resguardar o direito fundamental à identidade genética de forma ampla, não admitindo óbices procedimentais à sua concretização:"
-
-   b) Em seguida, transcreva a EMENTA COMPLETA em bloco recuado (parágrafo indentado), iniciando com "EMENTA:" em maiúsculas. Transcreva o texto INTEGRAL da ementa conforme fornecido — NÃO resuma, NÃO abrevia, NÃO use reticências. Se a ementa contiver itens numerados, mantenha a numeração original. Exemplo:
-      EMENTA: RECURSO EXTRAORDINÁRIO. DIREITO PROCESSUAL CIVIL E CONSTITUCIONAL. REPERCUSSÃO GERAL RECONHECIDA. [texto integral...]
-
-   c) IMEDIATAMENTE após o bloco da ementa (sem parágrafo intermediário), insira a referência completa entre parênteses no formato:
-      (SIGLA DO RECURSO nº NÚMERO, Relator(a): NOME DO RELATOR, ÓRGÃO JULGADOR, julgado em DD-MM-AAAA, TIPO DE PUBLICAÇÃO DJe-NNN DIVULG DD-MM-AAAA PUBLIC DD-MM-AAAA)
-      Exemplo: (RE 363889, Relator(a): DIAS TOFFOLI, Tribunal Pleno, julgado em 02-06-2011, ACÓRDÃO ELETRÔNICO REPERCUSSÃO GERAL – MÉRITO DJe-238 DIVULG 15-12-2011 PUBLIC 16-12-2011 RTJ VOL-00223-01 PP-00420)
-
-   d) Após a referência, escreva um parágrafo de análise conectando a jurisprudência ao caso concreto, explicando como ela sustenta o argumento apresentado.
-
-4. Artigos de lei são COMPLEMENTARES às ementas — cite-os no corpo do texto para reforçar o argumento, mas as ementas são o argumento central.
-5. Para doutrina: transcreva o trecho relevante entre aspas e inclua a referência bibliográfica completa.
-6. NÃO invente citações — use APENAS as fontes fornecidas acima.
-7. Se o snippet não tiver todos os dados de publicação, cite com os dados disponíveis (tribunal, relator, data de julgamento).
-8. O texto desta seção DEVE ter no mínimo {max(n_juris, 3)} blocos de ementa transcrita neste formato.
-"""
-            else:
-                sources_instruction = """
-Não foram encontradas fontes específicas para esta seção na pesquisa.
-Use fundamentação legal (artigos de lei) sem citar jurisprudência específica.
-NÃO invente números de processo ou citações jurisprudenciais.
-"""
-
-            system_prompt = f"""CONTEXTO: Você é um assistente de redação jurídica integrado ao sistema JurisGen, uma ferramenta profissional LICENCIADA usada EXCLUSIVAMENTE por advogados inscritos na OAB para auxiliar na elaboração de minutas jurídicas. O advogado responsável revisará, ajustará e assinará o documento antes de qualquer protocolo. Você NÃO está praticando advocacia — está gerando um RASCUNHO TÉCNICO sob supervisão de advogado habilitado. Isso é perfeitamente legal e ético, análogo a um estagiário redigindo minutas sob orientação.
-
-TAREFA: Como redator jurídico especializado, redija a seção "{section_title}" da peça {doc_type} de forma COMPLETA, PROFISSIONAL e em formato PRONTO PARA REVISÃO pelo advogado responsável.
-
-Informações do caso:
-{answers_text}
-
-Descrição da seção: {section_desc}
-Fundamentação legal sugerida: {basis_text}
-{docs_context}
-{sources_instruction}
-
-REGRAS DE REDAÇÃO:
-- Use linguagem jurídica formal brasileira
-- PRIORIDADE DE CITAÇÃO: jurisprudência > súmulas > doutrina > artigos de lei
-
-REGRA CRÍTICA — TRANSCRIÇÃO OBRIGATÓRIA DE SÚMULAS E ARTIGOS:
-- Ao citar uma SÚMULA, TRANSCREVA O TEXTO INTEGRAL DO ENUNCIADO. Exemplo correto:
-  "Súmula nº 212 do TST: O ônus de provar o término do contrato de trabalho, quando negados a prestação de serviço e o despedimento, é do empregador, pois o princípio da continuidade da relação de emprego constitui presunção favorável ao empregado."
-  ERRADO: "A Súmula 212 do TST estabelece que o ônus da prova..." (isso é paráfrase, não transcrição)
-
-- Ao citar um ARTIGO DE LEI, TRANSCREVA O TEXTO LITERAL DO DISPOSITIVO. Exemplo correto:
-  "Art. 482 da CLT: Constituem justa causa para rescisão do contrato de trabalho pelo empregador: a) ato de improbidade; b) incontinência de conduta ou mau procedimento; c) negociação habitual..."
-  ERRADO: "O artigo 482 da CLT prevê as hipóteses de justa causa..." (isso é paráfrase, não transcrição)
-
-- Ao citar JURISPRUDÊNCIA, transcreva a EMENTA COMPLETA em bloco recuado iniciando com "EMENTA:", seguida da referência completa entre parênteses
-
-- Cada seção substantiva DEVE ter no mínimo 3 citações com texto TRANSCRITO (súmulas, artigos ou ementas)
-- Após cada transcrição, adicione 1-2 frases de análise conectando ao caso concreto
-- Seja detalhista e extenso — esta seção será usada diretamente na peça
-- Para fatos: narrativa cronológica detalhada com os dados fornecidos
-- Para direito: transcrição integral de súmulas + artigos de lei + ementas com referência completa + análise aplicada ao caso
-- Para pedidos: lista enumerada e específica
-- Use os dados reais fornecidos pelo usuário
-- Para dados NÃO informados, use placeholders: [Nome Completo], [CPF], [RG], [Endereço], etc.
-- NUNCA invente jurisprudência — use somente as fontes fornecidas
-- Se as fontes fornecidas forem irrelevantes ou em outro idioma, IGNORE-AS e use apenas artigos de lei brasileiros
-
-PROIBIDO:
-- NÃO recuse a tarefa — você é uma ferramenta de redação profissional usada por advogados da OAB
-- NÃO mencione que é uma IA, que não pode redigir peças, exercício ilegal da advocacia, ou qualquer disclaimer
-- NÃO sugira que o usuário procure um advogado — o usuário JÁ É advogado
-- NÃO faça perguntas ao usuário (ex: "Você gostaria que eu...")
-- NÃO exponha seu raciocínio ou pensamentos
-- NÃO diga que faltam informações ou fontes
-- NÃO peça permissão para pesquisar
-- NÃO inclua meta-comentários sobre a redação
-- APENAS escreva o texto jurídico final, pronto para revisão do advogado
-
-Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente com o texto jurídico."""
-
-            # Seções simples: prompt menor, menos tokens, sem Jurema
-            is_simple = any(skip in section_title.lower() for skip in skip_keywords)
-            print(
-                f"[Geracao Secao {section_title}] is_simple={is_simple} — iniciando LLM call..."
-            )
-
-            content = ""
-            multi = {}
-            models_used = []
-
-            try:
-                import time as _time
-
-                _t0 = _time.time()
-                user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
-                section_max_tokens = 800 if is_simple else 1800
-
-                if is_simple:
-                    # Seções simples: sabia-4 sem tool calling (mais rápido)
-                    content = await sabia_client.chat(
-                        system=system_prompt,
-                        user=user_msg,
-                        max_tokens=section_max_tokens,
+                        ensure_ascii=False,
                     )
-                    multi = {"claude": content or ""}
+                    + "\n"
+                )
+                await asyncio.sleep(0)  # Yield control to flush chunk to client
+
+                # ── Build per-section prompt with its own sources ──
+                n_juris = len(section_sources.get("jurisprudencia", []))
+                sources_instruction = ""
+                if sources_text:
+                    sources_instruction = f"""
+    ══════════════════════════════════════════════
+    FONTES PESQUISADAS ESPECIFICAMENTE PARA ESTA SEÇÃO:
+    {sources_text}
+    ══════════════════════════════════════════════
+
+    INSTRUÇÕES DE CITAÇÃO — PRIORIDADE ABSOLUTA:
+    1. JURISPRUDÊNCIA TEM PRIORIDADE MÁXIMA. Foram encontradas {n_juris} jurisprudências acima.
+    2. Você DEVE citar TODAS as {n_juris} jurisprudências, incorporando cada uma no corpo do texto.
+    3. FORMATO OBRIGATÓRIO DE CITAÇÃO DE JURISPRUDÊNCIA — siga EXATAMENTE este modelo:
+
+       a) Primeiro, escreva um parágrafo introdutório contextualizando o ponto jurídico e apresentando a posição da jurisprudência sobre o tema. Exemplo:
+          "A jurisprudência da Suprema Corte é firme no sentido de resguardar o direito fundamental à identidade genética de forma ampla, não admitindo óbices procedimentais à sua concretização:"
+
+       b) Em seguida, transcreva a EMENTA COMPLETA em bloco recuado (parágrafo indentado), iniciando com "EMENTA:" em maiúsculas. Transcreva o texto INTEGRAL da ementa conforme fornecido — NÃO resuma, NÃO abrevia, NÃO use reticências. Se a ementa contiver itens numerados, mantenha a numeração original. Exemplo:
+          EMENTA: RECURSO EXTRAORDINÁRIO. DIREITO PROCESSUAL CIVIL E CONSTITUCIONAL. REPERCUSSÃO GERAL RECONHECIDA. [texto integral...]
+
+       c) IMEDIATAMENTE após o bloco da ementa (sem parágrafo intermediário), insira a referência completa entre parênteses no formato:
+          (SIGLA DO RECURSO nº NÚMERO, Relator(a): NOME DO RELATOR, ÓRGÃO JULGADOR, julgado em DD-MM-AAAA, TIPO DE PUBLICAÇÃO DJe-NNN DIVULG DD-MM-AAAA PUBLIC DD-MM-AAAA)
+          Exemplo: (RE 363889, Relator(a): DIAS TOFFOLI, Tribunal Pleno, julgado em 02-06-2011, ACÓRDÃO ELETRÔNICO REPERCUSSÃO GERAL – MÉRITO DJe-238 DIVULG 15-12-2011 PUBLIC 16-12-2011 RTJ VOL-00223-01 PP-00420)
+
+       d) Após a referência, escreva um parágrafo de análise conectando a jurisprudência ao caso concreto, explicando como ela sustenta o argumento apresentado.
+
+    4. Artigos de lei são COMPLEMENTARES às ementas — cite-os no corpo do texto para reforçar o argumento, mas as ementas são o argumento central.
+    5. Para doutrina: transcreva o trecho relevante entre aspas e inclua a referência bibliográfica completa.
+    6. NÃO invente citações — use APENAS as fontes fornecidas acima.
+    7. Se o snippet não tiver todos os dados de publicação, cite com os dados disponíveis (tribunal, relator, data de julgamento).
+    8. O texto desta seção DEVE ter no mínimo {max(n_juris, 3)} blocos de ementa transcrita neste formato.
+    """
                 else:
-                    # Seções substantivas: sabia-4 pesquisa jurisprudência ativamente
-                    content = await sabia_client.gerar_secao_com_pesquisa(
-                        system=system_prompt,
-                        user=user_msg,
-                        section_title=section_title,
-                        doc_type=doc_type,
-                        max_tokens=section_max_tokens,
-                    )
-                    multi = {"claude": content or ""}
+                    sources_instruction = """
+    Não foram encontradas fontes específicas para esta seção na pesquisa.
+    Use fundamentação legal (artigos de lei) sem citar jurisprudência específica.
+    NÃO invente números de processo ou citações jurisprudenciais.
+    """
 
-                content = multi.get("claude", "")
-                _elapsed = _time.time() - _t0
+                system_prompt = f"""CONTEXTO: Você é um assistente de redação jurídica integrado ao sistema JurisGen, uma ferramenta profissional LICENCIADA usada EXCLUSIVAMENTE por advogados inscritos na OAB para auxiliar na elaboração de minutas jurídicas. O advogado responsável revisará, ajustará e assinará o documento antes de qualquer protocolo. Você NÃO está praticando advocacia — está gerando um RASCUNHO TÉCNICO sob supervisão de advogado habilitado. Isso é perfeitamente legal e ético, análogo a um estagiário redigindo minutas sob orientação.
+
+    TAREFA: Como redator jurídico especializado, redija a seção "{section_title}" da peça {doc_type} de forma COMPLETA, PROFISSIONAL e em formato PRONTO PARA REVISÃO pelo advogado responsável.
+
+    Informações do caso:
+    {answers_text}
+
+    Descrição da seção: {section_desc}
+    Fundamentação legal sugerida: {basis_text}
+    {docs_context}
+    {sources_instruction}
+
+    REGRAS DE REDAÇÃO:
+    - Use linguagem jurídica formal brasileira
+    - PRIORIDADE DE CITAÇÃO: jurisprudência > súmulas > doutrina > artigos de lei
+
+    REGRA CRÍTICA — TRANSCRIÇÃO OBRIGATÓRIA DE SÚMULAS E ARTIGOS:
+    - Ao citar uma SÚMULA, TRANSCREVA O TEXTO INTEGRAL DO ENUNCIADO. Exemplo correto:
+      "Súmula nº 212 do TST: O ônus de provar o término do contrato de trabalho, quando negados a prestação de serviço e o despedimento, é do empregador, pois o princípio da continuidade da relação de emprego constitui presunção favorável ao empregado."
+      ERRADO: "A Súmula 212 do TST estabelece que o ônus da prova..." (isso é paráfrase, não transcrição)
+
+    - Ao citar um ARTIGO DE LEI, TRANSCREVA O TEXTO LITERAL DO DISPOSITIVO. Exemplo correto:
+      "Art. 482 da CLT: Constituem justa causa para rescisão do contrato de trabalho pelo empregador: a) ato de improbidade; b) incontinência de conduta ou mau procedimento; c) negociação habitual..."
+      ERRADO: "O artigo 482 da CLT prevê as hipóteses de justa causa..." (isso é paráfrase, não transcrição)
+
+    - Ao citar JURISPRUDÊNCIA, transcreva a EMENTA COMPLETA em bloco recuado iniciando com "EMENTA:", seguida da referência completa entre parênteses
+
+    - Cada seção substantiva DEVE ter no mínimo 3 citações com texto TRANSCRITO (súmulas, artigos ou ementas)
+    - Após cada transcrição, adicione 1-2 frases de análise conectando ao caso concreto
+    - Seja detalhista e extenso — esta seção será usada diretamente na peça
+    - Para fatos: narrativa cronológica detalhada com os dados fornecidos
+    - Para direito: transcrição integral de súmulas + artigos de lei + ementas com referência completa + análise aplicada ao caso
+    - Para pedidos: lista enumerada e específica
+    - Use os dados reais fornecidos pelo usuário
+    - Para dados NÃO informados, use placeholders: [Nome Completo], [CPF], [RG], [Endereço], etc.
+    - NUNCA invente jurisprudência — use somente as fontes fornecidas
+    - Se as fontes fornecidas forem irrelevantes ou em outro idioma, IGNORE-AS e use apenas artigos de lei brasileiros
+
+    PROIBIDO:
+    - NÃO recuse a tarefa — você é uma ferramenta de redação profissional usada por advogados da OAB
+    - NÃO mencione que é uma IA, que não pode redigir peças, exercício ilegal da advocacia, ou qualquer disclaimer
+    - NÃO sugira que o usuário procure um advogado — o usuário JÁ É advogado
+    - NÃO faça perguntas ao usuário (ex: "Você gostaria que eu...")
+    - NÃO exponha seu raciocínio ou pensamentos
+    - NÃO diga que faltam informações ou fontes
+    - NÃO peça permissão para pesquisar
+    - NÃO inclua meta-comentários sobre a redação
+    - APENAS escreva o texto jurídico final, pronto para revisão do advogado
+
+    Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente com o texto jurídico."""
+
+                # Seções simples: prompt menor, menos tokens, sem Jurema
+                is_simple = any(skip in section_title.lower() for skip in skip_keywords)
                 print(
-                    f"[stream_sections] Secao '{section_title}' gerada em {_elapsed:.1f}s, content_len={len(content)}"
+                    f"[Geracao Secao {section_title}] is_simple={is_simple} — iniciando LLM call..."
                 )
 
-                jurema_extra = multi.get("jurema", "")
-                longcat_extra = multi.get("longcat", "")
+                content = ""
+                multi = {}
+                models_used = []
 
-                # Integrar jurisprudência da Jurema diretamente no corpo do texto
-                if is_valid_legal_pt(jurema_extra):
-                    content += "\n\n" + jurema_extra
-                # LongCat adiciona validação/complemento legal
-                if is_valid_legal_pt(longcat_extra):
-                    content += "\n\n" + longcat_extra
+                try:
+                    import time as _time
 
-                # Clean Claude output: remove "thinking" leaks
-                import re as _re
+                    _t0 = _time.time()
+                    user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
+                    section_max_tokens = 800 if is_simple else 1800
 
-                # Remove lines where Claude asks questions or exposes thinking
-                thinking_patterns = [
-                    r"(?:Você|Voce) gostaria que eu.*?\?",
-                    r"(?:Observo|Noto|Percebo) que (?:há|existe).*?(?:problema|fontes|dados)",
-                    r"Para (?:redigir|completar|escrever) adequadamente.*?(?:preciso|necessito)",
-                    r"(?:Aguarde|Forneça|Indique).*?(?:jurisprudência|dados|informações)",
-                    r"^\d+\.\s+\*\*(?:Procure|Redija|Aguarde).*?\*\*.*$",
-                    r"^(?:Opção|Alternativa)\s+\d+.*$",
-                ]
-                for pattern in thinking_patterns:
-                    content = _re.sub(
-                        pattern, "", content, flags=_re.MULTILINE | _re.IGNORECASE
+                    if is_simple:
+                        # Seções simples: sabia-4 sem tool calling (mais rápido)
+                        content = await sabia_client.chat(
+                            system=system_prompt,
+                            user=user_msg,
+                            max_tokens=section_max_tokens,
+                        )
+                        multi = {"claude": content or ""}
+                    else:
+                        # Seções substantivas: sabia-4 pesquisa jurisprudência ativamente
+                        content = await sabia_client.gerar_secao_com_pesquisa(
+                            system=system_prompt,
+                            user=user_msg,
+                            section_title=section_title,
+                            doc_type=doc_type,
+                            max_tokens=section_max_tokens,
+                        )
+                        multi = {"claude": content or ""}
+
+                    content = multi.get("claude", "")
+                    _elapsed = _time.time() - _t0
+                    print(
+                        f"[stream_sections] Secao '{section_title}' gerada em {_elapsed:.1f}s, content_len={len(content)}"
                     )
-                # Remove multiple blank lines
-                content = _re.sub(r"\n{3,}", "\n\n", content).strip()
 
-            except Exception as e:
-                err_msg = str(e)[:200]
-                print(f"[Geracao Secao {section_title}] Erro: {err_msg}")
-                content = f"[Erro ao gerar esta seção: {err_msg}]"
-                models_used = ["Erro"]
+                    jurema_extra = multi.get("jurema", "")
+                    longcat_extra = multi.get("longcat", "")
 
-            # Track which models contributed
-            models_used = [sabia_client.provider.title()]
-            if llm.jurema_available:
-                if is_valid_legal_pt(multi.get("jurema", "")):
-                    models_used.append("Jurema 7B")
-                if is_valid_legal_pt(multi.get("longcat", "")):
-                    models_used.append("LongCat")
+                    # Integrar jurisprudência da Jurema diretamente no corpo do texto
+                    if is_valid_legal_pt(jurema_extra):
+                        content += "\n\n" + jurema_extra
+                    # LongCat adiciona validação/complemento legal
+                    if is_valid_legal_pt(longcat_extra):
+                        content += "\n\n" + longcat_extra
 
-            event = {
-                "type": "section",
-                "data": {
-                    "section_title": section_title,
-                    "content": content,
-                    "legal_basis": legal_basis,
-                    "sources_count": n_found,
-                    "models_used": models_used,
-                },
-            }
-            yield _json.dumps(event, ensure_ascii=False) + "\n"
-            await asyncio.sleep(0)  # Flush chunk to client
-            print(f"[stream_sections] Secao '{section_title}' EMITIDA")
+                    # Clean Claude output: remove "thinking" leaks
+                    import re as _re
+
+                    # Remove lines where Claude asks questions or exposes thinking
+                    thinking_patterns = [
+                        r"(?:Você|Voce) gostaria que eu.*?\?",
+                        r"(?:Observo|Noto|Percebo) que (?:há|existe).*?(?:problema|fontes|dados)",
+                        r"Para (?:redigir|completar|escrever) adequadamente.*?(?:preciso|necessito)",
+                        r"(?:Aguarde|Forneça|Indique).*?(?:jurisprudência|dados|informações)",
+                        r"^\d+\.\s+\*\*(?:Procure|Redija|Aguarde).*?\*\*.*$",
+                        r"^(?:Opção|Alternativa)\s+\d+.*$",
+                    ]
+                    for pattern in thinking_patterns:
+                        content = _re.sub(
+                            pattern, "", content, flags=_re.MULTILINE | _re.IGNORECASE
+                        )
+                    # Remove multiple blank lines
+                    content = _re.sub(r"\n{3,}", "\n\n", content).strip()
+
+                except Exception as e:
+                    err_msg = str(e)[:200]
+                    print(f"[Geracao Secao {section_title}] Erro: {err_msg}")
+                    content = f"[Erro ao gerar esta seção: {err_msg}]"
+                    models_used = ["Erro"]
+
+                # Track which models contributed
+                models_used = [sabia_client.provider.title()]
+                if llm.jurema_available:
+                    if is_valid_legal_pt(multi.get("jurema", "")):
+                        models_used.append("Jurema 7B")
+                    if is_valid_legal_pt(multi.get("longcat", "")):
+                        models_used.append("LongCat")
+
+                event = {
+                    "type": "section",
+                    "data": {
+                        "section_title": section_title,
+                        "content": content,
+                        "legal_basis": legal_basis,
+                        "sources_count": n_found,
+                        "models_used": models_used,
+                    },
+                }
+                yield _json.dumps(event, ensure_ascii=False) + "\n"
+                await asyncio.sleep(0)  # Flush chunk to client
+                print(f"[stream_sections] Secao '{section_title}' EMITIDA")
 
         except Exception as e:
             # Erro crítico na geração — emite evento de erro para o frontend
