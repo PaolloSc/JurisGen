@@ -1579,6 +1579,7 @@ async def generate_document(session_id: str):
             )
             + "\n"
         )
+        await asyncio.sleep(0)  # Flush chunk to client
 
         # Executar todas as pesquisas em paralelo com timeout
         search_results = {}
@@ -1670,6 +1671,7 @@ async def generate_document(session_id: str):
                 )
                 + "\n"
             )
+            await asyncio.sleep(0)  # Yield control to flush chunk to client
 
             # ── Build per-section prompt with its own sources ──
             n_juris = len(section_sources.get("jurisprudencia", []))
@@ -1772,39 +1774,9 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             multi = {}
             models_used = []
 
-            # Validate and enrich with HF models ONLY if output is valid Portuguese legal text
-            def _is_valid_legal_pt(text: str) -> bool:
-                """Check if text is valid Portuguese legal content (not garbage/chinese/etc)."""
-                if not text or len(text) < 50:
-                    return False
-                if text.startswith("[Modelo"):
-                    return False
-                import re as _re
-
-                non_latin = len(
-                    _re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text)
-                )
-                if non_latin > 5:
-                    return False
-                pt_keywords = [
-                    "art.",
-                    "lei",
-                    "código",
-                    "tribunal",
-                    "processo",
-                    "direito",
-                    "jurisprudência",
-                    "dano",
-                    "réu",
-                    "autor",
-                ]
-                text_lower = text.lower()
-                matches = sum(1 for kw in pt_keywords if kw in text_lower)
-                return matches >= 2
-
             try:
                 user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
-                section_max_tokens = 1200 if is_simple else 3000
+                section_max_tokens = 800 if is_simple else 1800
 
                 if is_simple:
                     # Seções simples: sabia-4 sem tool calling (mais rápido)
@@ -1831,10 +1803,10 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                 longcat_extra = multi.get("longcat", "")
 
                 # Integrar jurisprudência da Jurema diretamente no corpo do texto
-                if _is_valid_legal_pt(jurema_extra):
+                if is_valid_legal_pt(jurema_extra):
                     content += "\n\n" + jurema_extra
                 # LongCat adiciona validação/complemento legal
-                if _is_valid_legal_pt(longcat_extra):
+                if is_valid_legal_pt(longcat_extra):
                     content += "\n\n" + longcat_extra
 
                 # Clean Claude output: remove "thinking" leaks
@@ -1865,9 +1837,9 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             # Track which models contributed
             models_used = [sabia_client.provider.title()]
             if llm.jurema_available:
-                if _is_valid_legal_pt(multi.get("jurema", "")):
+                if is_valid_legal_pt(multi.get("jurema", "")):
                     models_used.append("Jurema 7B")
-                if _is_valid_legal_pt(multi.get("longcat", "")):
+                if is_valid_legal_pt(multi.get("longcat", "")):
                     models_used.append("LongCat")
 
             event = {
@@ -1881,6 +1853,7 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                 },
             }
             yield _json.dumps(event, ensure_ascii=False) + "\n"
+            await asyncio.sleep(0)  # Flush chunk to client
 
         except Exception as e:
             # Erro crítico na geração — emite evento de erro para o frontend
@@ -1929,8 +1902,19 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             )
             + "\n"
         )
+        await asyncio.sleep(0)  # Flush final chunk to client
 
-    return StreamingResponse(stream_sections(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        stream_sections(),
+        media_type="application/x-ndjson",
+        background=None,
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Transfer-Encoding": "chunked",
+        },
+    )
 
 
 # ─── Análise Adversarial ───
