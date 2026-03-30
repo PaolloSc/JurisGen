@@ -360,11 +360,44 @@ app.add_middleware(
 )
 
 
-# ============== In-Memory Store ==============
+# ============== In-Memory + File Store ==============
 
 sessions: dict[str, Session] = {}
 # Document knowledge base: list of {"name", "content", "source", "web_url", "chunks"}
 document_store: list[dict[str, Any]] = []
+
+_SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")
+
+
+def _save_sessions():
+    """Persist sessions to disk so backend restarts don't lose them."""
+    try:
+        data = {sid: s.model_dump() for sid, s in sessions.items()}
+        with open(_SESSIONS_FILE, "w", encoding="utf-8") as f:
+            import json as _j
+            _j.dump(data, f, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+
+
+def _load_sessions():
+    """Load persisted sessions on startup."""
+    try:
+        if not os.path.exists(_SESSIONS_FILE):
+            return
+        with open(_SESSIONS_FILE, encoding="utf-8") as f:
+            import json as _j
+            data = _j.load(f)
+        for sid, raw in data.items():
+            try:
+                sessions[sid] = Session(**raw)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+_load_sessions()
 
 
 # ============== Helper Functions ==============
@@ -372,14 +405,15 @@ document_store: list[dict[str, Any]] = []
 def get_session(session_id: str) -> Session:
     """Get session by ID or raise 404"""
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=f"Sessão não encontrada. Reinicie o fluxo.")
     return sessions[session_id]
 
 
 def update_session(session: Session):
-    """Update session timestamp"""
+    """Update session timestamp and persist."""
     session.updated_at = datetime.now()
     sessions[session.id] = session
+    _save_sessions()
 
 
 def _normalize_questions(questions: list) -> list:
@@ -1209,6 +1243,18 @@ async def generate_document(session_id: str):
     answers_text = "\n".join(f"- {k}: {v}" for k, v in session.answers.items())
     outline = session.outline or {}
     sections = outline.get("sections", [])
+
+    # Guard: if no sections, generate a default outline on the fly
+    if not sections:
+        sections = [
+            {"title": "I. ENDEREÇAMENTO E QUALIFICAÇÃO DAS PARTES", "description": "Identificação completa das partes, incluindo dados pessoais, endereços e qualificação jurídica.", "legal_basis": ["Art. 319, II do CPC"], "priority": "obrigatoria"},
+            {"title": "II. DOS FATOS", "description": "Narrativa cronológica detalhada dos fatos que ensejam a demanda.", "legal_basis": ["Art. 319, III do CPC"], "priority": "obrigatoria"},
+            {"title": "III. DO DIREITO APLICÁVEL", "description": "Fundamentação sobre a legislação aplicável, jurisprudência e doutrina pertinentes.", "legal_basis": ["CF/88", "CC/2002", "CLT"], "priority": "obrigatoria"},
+            {"title": "IV. DOS PEDIDOS", "description": "Lista enumerada dos pedidos ao juízo.", "legal_basis": ["Art. 319, IV do CPC"], "priority": "obrigatoria"},
+            {"title": "V. PROVAS, VALOR DA CAUSA E FECHAMENTO", "description": "Requerimento de provas, fixação do valor da causa e encerramento.", "legal_basis": ["Art. 319, V e VI do CPC"], "priority": "obrigatoria"},
+        ]
+        session.outline = {"title": doc_type.upper(), "sections": sections}
+        update_session(session)
 
     # Case context summary for targeted searches
     case_context = f"{doc_type} {' '.join(list(session.answers.values())[:3])}"[:200]
