@@ -515,19 +515,30 @@ class LLMClient:
                 return await self._chat_claude_cli(system, user, json_mode)
             except Exception as e:
                 error_str = str(e).lower()
-                # Only fall back on usage-limit errors; auth errors must surface so the
-                # user knows to run `claude login`.
-                if "limit" in error_str or "resets" in error_str:
+                # Fall back on auth errors OR usage-limit errors so the user never
+                # sees a broken section.  Both conditions are recoverable via a
+                # working API key.
+                needs_fallback = (
+                    "limit" in error_str
+                    or "resets" in error_str
+                    or "login" in error_str
+                    or "autenticado" in error_str
+                    or "authenticated" in error_str
+                    or "not found" in error_str
+                )
+                if needs_fallback:
                     if os.getenv("MARITACA_API_KEY"):
                         print(
-                            f"[Claude CLI] Uso limitado. Fazendo fallback para sabia-4 (Maritaca)..."
+                            f"[Claude CLI] Erro ({str(e)[:80]}). "
+                            f"Fallback automático → sabia-4 (Maritaca)."
                         )
                         return await self._chat_openai(
                             system, user, temperature, max_tokens
                         )
                     elif os.getenv("ANTHROPIC_API_KEY"):
                         print(
-                            f"[Claude CLI] Uso limitado. Fazendo fallback para Anthropic API..."
+                            f"[Claude CLI] Erro ({str(e)[:80]}). "
+                            f"Fallback automático → Anthropic API."
                         )
                         return await self._chat_anthropic(
                             system, user, temperature, max_tokens
@@ -734,23 +745,39 @@ Be concise. Respond in Portuguese."""
                 env = os.environ.copy()
                 env["TERM"] = "dumb"
                 env["PYTHONIOENCODING"] = "utf-8"
-                # Garante que HOME aponta para o diretório correto (importante no Docker/Linux)
-                if "HOME" not in env or not env["HOME"]:
-                    env["HOME"] = os.path.expanduser("~")
-                # Garante que o Claude CLI encontre as credenciais no diretório correto
-                claude_home = os.path.join(env["HOME"], ".claude")
-                if os.path.isdir(claude_home):
-                    env["CLAUDE_CONFIG_DIR"] = claude_home
-                # Desativa qualquer telemetria/interatividade
                 env["NO_COLOR"] = "1"
                 env["CI"] = "1"
-                # Claude Code on Windows needs git-bash path
+
+                # ── Resolve HOME (Windows may use USERPROFILE instead of HOME) ──
+                home_dir = (
+                    env.get("HOME")
+                    or env.get("USERPROFILE")
+                    or os.path.expanduser("~")
+                )
+                env["HOME"] = home_dir
+
+                # ── Point Claude CLI to its config/credential directory ──
+                if "CLAUDE_CONFIG_DIR" not in env:
+                    claude_home = os.path.join(home_dir, ".claude")
+                    if os.path.isdir(claude_home):
+                        env["CLAUDE_CONFIG_DIR"] = claude_home
+
+                # ── API-key auth (for Render / CI environments) ──
+                # If ANTHROPIC_API_KEY is available and not already forwarded,
+                # pass it so Claude CLI authenticates via key (no `claude login` needed).
+                if os.getenv("ANTHROPIC_API_KEY") and "ANTHROPIC_API_KEY" not in env:
+                    env["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY", "")
+
+                # ── Git-bash path (Windows only) ──
                 if "CLAUDE_CODE_GIT_BASH_PATH" not in env:
-                    git_bash_path = (
-                        r"C:\Users\paollo\AppData\Local\Programs\Git\bin\bash.exe"
-                    )
-                    if os.path.exists(git_bash_path):
-                        env["CLAUDE_CODE_GIT_BASH_PATH"] = git_bash_path
+                    for candidate in [
+                        r"C:\Users\paollo\AppData\Local\Programs\Git\bin\bash.exe",
+                        r"C:\Program Files\Git\bin\bash.exe",
+                        os.path.join(home_dir, r"AppData\Local\Programs\Git\bin\bash.exe"),
+                    ]:
+                        if os.path.exists(candidate):
+                            env["CLAUDE_CODE_GIT_BASH_PATH"] = candidate
+                            break
 
                 # Pass prompt via stdin pipe to avoid command line length limits
                 cmd = [claude_exe, "-p", "-", "--output-format", "text"]
