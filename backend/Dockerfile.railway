@@ -17,6 +17,10 @@ RUN pip install --no-cache-dir -r requirements_minimal.txt
 
 COPY . .
 
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# start.sh restores Claude CLI credentials from CLAUDE_CREDENTIALS_B64 then
+# launches uvicorn.
+CMD ["bash", "start.sh"]

@@ -7,6 +7,8 @@ services:
     envVars:
       - key: CLAUDE_AUTH_MODE
         value: cli
+      - key: CLAUDE_CREDENTIALS_B64
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: MARITACA_API_KEY
