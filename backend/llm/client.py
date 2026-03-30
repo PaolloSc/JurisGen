@@ -885,16 +885,29 @@ Be concise. Respond in Portuguese."""
     # ── OpenAI-compatible (Maritaca) ──────────────────────────────────────────
 
     async def _chat_openai(self, system, user, temperature, max_tokens):
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
+        response = await asyncio.wait_for(
+            self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
+            timeout=25.0,
         )
-        return response.choices[0].message.content
+        raw_content = response.choices[0].message.content or ""
+        # Maritaca API may return Latin-1 encoded bytes in a UTF-8 JSON body.
+        # Re-encode as Latin-1 bytes and decode as UTF-8 to fix the encoding mismatch.
+        if isinstance(raw_content, str):
+            try:
+                raw_content.encode("utf-8").decode("utf-8")
+            except (UnicodeDecodeError, UnicodeError):
+                raw_content = raw_content.encode("latin-1").decode(
+                    "utf-8", errors="replace"
+                )
+        return raw_content
 
     async def _stream_openai(
         self, system, user, temperature, max_tokens

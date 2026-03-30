@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from llm.client import LLMClient, is_valid_legal_pt, sabia_client, orchestrator_client
+
 llm = LLMClient()
 
 
@@ -46,6 +47,7 @@ NÃO invente citações."""
 # Importar busca no JusBrasil
 try:
     from jusbrasil_search import JusBrasilSearch
+
     jusbrasil_search = JusBrasilSearch()
 except ImportError:
     jusbrasil_search = None
@@ -54,6 +56,7 @@ except ImportError:
 # ============== SharePoint / Graph API ==============
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
 
 def _get_graph_token() -> str:
     """Obtain OAuth2 token via client credentials. Raises HTTPException if creds missing."""
@@ -65,19 +68,24 @@ def _get_graph_token() -> str:
         raise HTTPException(
             status_code=503,
             detail="SharePoint credentials not configured in environment variables. "
-                   "Set MS_TENANT_ID, MS_CLIENT_ID and MS_CLIENT_SECRET in .env"
+            "Set MS_TENANT_ID, MS_CLIENT_ID and MS_CLIENT_SECRET in .env",
         )
 
     import msal
+
     msal_app = msal.ConfidentialClientApplication(
         client_id,
         authority=f"https://login.microsoftonline.com/{tenant_id}",
         client_credential=client_secret,
     )
-    result = msal_app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+    result = msal_app.acquire_token_for_client(
+        scopes=["https://graph.microsoft.com/.default"]
+    )
     if "access_token" not in result:
         error = result.get("error_description", result.get("error", "Unknown error"))
-        raise HTTPException(status_code=502, detail=f"Failed to authenticate with Azure AD: {error}")
+        raise HTTPException(
+            status_code=502, detail=f"Failed to authenticate with Azure AD: {error}"
+        )
     return result["access_token"]
 
 
@@ -87,39 +95,50 @@ async def _sharepoint_search(query: str, limit: int = 10) -> list[dict]:
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     payload = {
-        "requests": [{
-            "entityTypes": ["driveItem"],
-            "query": {"queryString": f"{query} filetype:docx OR filetype:doc"},
-            "size": limit,
-            "fields": ["id", "name", "webUrl", "parentReference", "lastModifiedDateTime", "size"],
-        }]
+        "requests": [
+            {
+                "entityTypes": ["driveItem"],
+                "query": {"queryString": f"{query} filetype:docx OR filetype:doc"},
+                "size": limit,
+                "fields": [
+                    "id",
+                    "name",
+                    "webUrl",
+                    "parentReference",
+                    "lastModifiedDateTime",
+                    "size",
+                ],
+            }
+        ]
     }
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(f"{GRAPH_BASE}/search/query", headers=headers, json=payload)
+        resp = await client.post(
+            f"{GRAPH_BASE}/search/query", headers=headers, json=payload
+        )
         if not resp.is_success:
-            raise HTTPException(status_code=resp.status_code, detail=f"Graph API error: {resp.text}")
+            raise HTTPException(
+                status_code=resp.status_code, detail=f"Graph API error: {resp.text}"
+            )
         data = resp.json()
 
-    hits = (
-        data.get("value", [{}])[0]
-            .get("hitsContainers", [{}])[0]
-            .get("hits", [])
-    )
+    hits = data.get("value", [{}])[0].get("hitsContainers", [{}])[0].get("hits", [])
 
     results = []
     for hit in hits:
         resource = hit.get("resource", {})
         parent = resource.get("parentReference", {})
-        results.append({
-            "id": resource.get("id", ""),
-            "name": resource.get("name", ""),
-            "web_url": resource.get("webUrl", ""),
-            "drive_id": parent.get("driveId", ""),
-            "site_id": parent.get("siteId", ""),
-            "last_modified": resource.get("lastModifiedDateTime", ""),
-            "summary": hit.get("summary", ""),
-        })
+        results.append(
+            {
+                "id": resource.get("id", ""),
+                "name": resource.get("name", ""),
+                "web_url": resource.get("webUrl", ""),
+                "drive_id": parent.get("driveId", ""),
+                "site_id": parent.get("siteId", ""),
+                "last_modified": resource.get("lastModifiedDateTime", ""),
+                "summary": hit.get("summary", ""),
+            }
+        )
     return results
 
 
@@ -134,14 +153,20 @@ async def _get_document_content(drive_id: str, item_id: str) -> str:
             f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}",
             headers=headers,
         )
-        file_name = meta_resp.json().get("name", "document") if meta_resp.is_success else "document"
+        file_name = (
+            meta_resp.json().get("name", "document")
+            if meta_resp.is_success
+            else "document"
+        )
 
         resp = await client.get(
             f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}/content",
             headers=headers,
         )
         if not resp.is_success:
-            raise HTTPException(status_code=resp.status_code, detail="Failed to download document")
+            raise HTTPException(
+                status_code=resp.status_code, detail="Failed to download document"
+            )
         content_bytes = resp.content
 
     # Docling: structured extraction with layout, tables, headings
@@ -159,6 +184,7 @@ async def _get_document_content(drive_id: str, item_id: str) -> str:
         md_text = result.document.export_to_markdown()
 
         import os
+
         os.unlink(tmp_path)
 
         if md_text and md_text.strip():
@@ -169,6 +195,7 @@ async def _get_document_content(drive_id: str, item_id: str) -> str:
     # Fallback: python-docx para DOCX
     try:
         import docx, io
+
         doc = docx.Document(io.BytesIO(content_bytes))
         return "\n".join(p.text for p in doc.paragraphs if p.text.strip())[:3000]
     except Exception:
@@ -177,14 +204,17 @@ async def _get_document_content(drive_id: str, item_id: str) -> str:
     # Fallback: PyPDF2 para PDF
     try:
         import PyPDF2, io
+
         reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-        text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+        text = "\n".join(
+            page.extract_text() for page in reader.pages if page.extract_text()
+        )
         if text.strip():
             return text[:4000]
     except Exception:
         pass
 
-    if b'\x00' in content_bytes[:1000] or content_bytes[:4] == b'%PDF':
+    if b"\x00" in content_bytes[:1000] or content_bytes[:4] == b"%PDF":
         return "[Documento em formato binário não suportado ou falha na extração de texto.]"
 
     try:
@@ -195,79 +225,82 @@ async def _get_document_content(drive_id: str, item_id: str) -> str:
 
 # ============== CNJ DataJud API ==============
 
+
 async def _cnj_search(tribunal: str, query: str, limit: int = 10) -> list[dict]:
     """Search for a process or keywords in CNJ DataJud API."""
     # Using the public API Key provided in CNJ's documentation as fallback
-    api_key = os.getenv("CNJ_API_KEY", "cDZpZl9JTUJ0TXlPQU0xcUpFeVE6Ym9Ld2VTb0dUNHkyMW1id211MExOQQ==")
-    
+    api_key = os.getenv(
+        "CNJ_API_KEY", "cDZpZl9JTUJ0TXlPQU0xcUpFeVE6Ym9Ld2VTb0dUNHkyMW1id211MExOQQ=="
+    )
+
     # CNJ endpoint uses lowercase 'api_publica_{sigla}'
-    url = f"https://api-publica.datajud.cnj.jus.br/api_publica_{tribunal.lower()}/_search"
-    headers = {
-        "Authorization": f"APIKey {api_key}",
-        "Content-Type": "application/json"
-    }
-    
+    url = (
+        f"https://api-publica.datajud.cnj.jus.br/api_publica_{tribunal.lower()}/_search"
+    )
+    headers = {"Authorization": f"APIKey {api_key}", "Content-Type": "application/json"}
+
     import re
+
     # If the query is mostly digits, assume it's a process number search
-    is_processo = bool(re.match(r'^[\d\.\-]+$', query.strip()))
-    
+    is_processo = bool(re.match(r"^[\d\.\-]+$", query.strip()))
+
     if is_processo:
-        numero = re.sub(r'[^\d]', '', query)
-        payload = {
-            "query": {
-                "match": {
-                    "numeroProcesso": numero
-                }
-            },
-            "size": limit
-        }
+        numero = re.sub(r"[^\d]", "", query)
+        payload = {"query": {"match": {"numeroProcesso": numero}}, "size": limit}
     else:
         # Generic text search in class, subjects, and judging organ
         payload = {
             "query": {
                 "multi_match": {
                     "query": query,
-                    "fields": ["classe.nome", "assuntos.nome", "orgaoJulgador.nome"]
+                    "fields": ["classe.nome", "assuntos.nome", "orgaoJulgador.nome"],
                 }
             },
-            "size": limit
+            "size": limit,
         }
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(url, headers=headers, json=payload)
         if not resp.is_success:
             print("CNJ API Error:", resp.text)
-            raise HTTPException(status_code=resp.status_code, detail=f"CNJ API Error: {resp.text}")
+            raise HTTPException(
+                status_code=resp.status_code, detail=f"CNJ API Error: {resp.text}"
+            )
         data = resp.json()
 
     hits = data.get("hits", {}).get("hits", [])
     results = []
-    
+
     for hit in hits:
         source = hit.get("_source", {})
-        
+
         # safely extract subjects & movements
         assuntos = source.get("assuntos", [])
         assunto_principal = assuntos[0].get("nome", "") if assuntos else ""
-        
+
         movimentos = source.get("movimentos", [])
-        ultimos_movimentos = [m.get("nome", "") for m in reversed(movimentos[-3:])] if movimentos else []
-        
-        results.append({
-            "numeroProcesso": source.get("numeroProcesso", ""),
-            "classe": source.get("classe", {}).get("nome", ""),
-            "tribunal": source.get("tribunal", tribunal.upper()),
-            "dataAjuizamento": source.get("dataAjuizamento", ""),
-            "orgaoJulgador": source.get("orgaoJulgador", {}).get("nome", ""),
-            "assuntoPrincipal": assunto_principal,
-            "movimentos": ultimos_movimentos,
-            "grau": source.get("grau", "")
-        })
-        
+        ultimos_movimentos = (
+            [m.get("nome", "") for m in reversed(movimentos[-3:])] if movimentos else []
+        )
+
+        results.append(
+            {
+                "numeroProcesso": source.get("numeroProcesso", ""),
+                "classe": source.get("classe", {}).get("nome", ""),
+                "tribunal": source.get("tribunal", tribunal.upper()),
+                "dataAjuizamento": source.get("dataAjuizamento", ""),
+                "orgaoJulgador": source.get("orgaoJulgador", {}).get("nome", ""),
+                "assuntoPrincipal": assunto_principal,
+                "movimentos": ultimos_movimentos,
+                "grau": source.get("grau", ""),
+            }
+        )
+
     return results
 
 
 # ============== Models ==============
+
 
 class SessionCreate(BaseModel):
     doc_type: Optional[str] = None
@@ -347,7 +380,7 @@ app = FastAPI(
     title="JurisGen AI",
     description="Gerador Adaptativo de Documentos Jurídicos",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS — allow all origins (frontend is a public static site, no cookies used)
@@ -375,6 +408,7 @@ def _save_sessions():
         data = {sid: s.model_dump() for sid, s in sessions.items()}
         with open(_SESSIONS_FILE, "w", encoding="utf-8") as f:
             import json as _j
+
             _j.dump(data, f, ensure_ascii=False, default=str)
     except Exception:
         pass
@@ -387,6 +421,7 @@ def _load_sessions():
             return
         with open(_SESSIONS_FILE, encoding="utf-8") as f:
             import json as _j
+
             data = _j.load(f)
         for sid, raw in data.items():
             try:
@@ -402,10 +437,13 @@ _load_sessions()
 
 # ============== Helper Functions ==============
 
+
 def get_session(session_id: str) -> Session:
     """Get session by ID or raise 404"""
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail=f"Sessão não encontrada. Reinicie o fluxo.")
+        raise HTTPException(
+            status_code=404, detail=f"Sessão não encontrada. Reinicie o fluxo."
+        )
     return sessions[session_id]
 
 
@@ -423,7 +461,9 @@ def _normalize_questions(questions: list) -> list:
         if not isinstance(q, dict):
             continue
         # Ensure 'text' field exists - Claude may use different field names
-        text = q.get("text") or q.get("question") or q.get("label") or q.get("title") or ""
+        text = (
+            q.get("text") or q.get("question") or q.get("label") or q.get("title") or ""
+        )
         if not text:
             continue  # Skip questions with no text at all
         q["text"] = text
@@ -440,15 +480,34 @@ def _normalize_questions(questions: list) -> list:
             q["type"] = "text"
         # Normalize options
         if q["type"] in ("choice", "multiple"):
-            if "options" in q and isinstance(q["options"], list) and len(q["options"]) > 0:
+            if (
+                "options" in q
+                and isinstance(q["options"], list)
+                and len(q["options"]) > 0
+            ):
                 opts = []
                 for opt in q["options"]:
                     if isinstance(opt, str):
-                        opts.append({"id": opt.lower().replace(" ", "_")[:20], "label": opt})
+                        opts.append(
+                            {"id": opt.lower().replace(" ", "_")[:20], "label": opt}
+                        )
                     elif isinstance(opt, dict):
-                        opt_id = opt.get("id") or opt.get("value") or opt.get("label", "opt")
-                        opt_label = opt.get("label") or opt.get("text") or opt.get("value") or str(opt_id)
-                        opts.append({"id": str(opt_id), "label": opt_label, "desc": opt.get("desc", opt.get("description", ""))})
+                        opt_id = (
+                            opt.get("id") or opt.get("value") or opt.get("label", "opt")
+                        )
+                        opt_label = (
+                            opt.get("label")
+                            or opt.get("text")
+                            or opt.get("value")
+                            or str(opt_id)
+                        )
+                        opts.append(
+                            {
+                                "id": str(opt_id),
+                                "label": opt_label,
+                                "desc": opt.get("desc", opt.get("description", "")),
+                            }
+                        )
                     else:
                         opts.append({"id": str(opt), "label": str(opt)})
                 q["options"] = opts
@@ -461,6 +520,7 @@ def _normalize_questions(questions: list) -> list:
 
 
 # ============== API Routes ==============
+
 
 @app.get("/")
 async def root():
@@ -480,8 +540,14 @@ async def llm_status():
     sabia_status = await sabia_client.status()
     orchestrator_status = await orchestrator_client.status()
     return {
-        "petition_writer": {**sabia_status, "role": "Redação de seções + pesquisa de jurisprudência"},
-        "orchestrator": {**orchestrator_status, "role": "Classificação, perguntas e estrutura do documento"},
+        "petition_writer": {
+            **sabia_status,
+            "role": "Redação de seções + pesquisa de jurisprudência",
+        },
+        "orchestrator": {
+            **orchestrator_status,
+            "role": "Classificação, perguntas e estrutura do documento",
+        },
     }
 
 
@@ -510,7 +576,10 @@ async def listar_bibliotecas_sharepoint():
                 timeout=30,
             )
             if resp.status_code != 200:
-                return {"bibliotecas": [], "message": f"Erro ao buscar listas: {resp.status_code}"}
+                return {
+                    "bibliotecas": [],
+                    "message": f"Erro ao buscar listas: {resp.status_code}",
+                }
             lists_data = resp.json().get("value", [])
             bibliotecas = [
                 {"title": l["displayName"], "id": l["id"]}
@@ -519,7 +588,10 @@ async def listar_bibliotecas_sharepoint():
             ]
         return {"bibliotecas": bibliotecas}
     except Exception:
-        return {"bibliotecas": [], "message": "Credenciais do SharePoint não configuradas."}
+        return {
+            "bibliotecas": [],
+            "message": "Credenciais do SharePoint não configuradas.",
+        }
 
 
 @app.post("/api/listar-sharepoint")
@@ -529,7 +601,11 @@ async def listar_documentos_sharepoint(request: dict):
         token = _get_graph_token()
         drive_id = os.getenv("SHAREPOINT_DRIVE_ID", "")
         if not drive_id:
-            return {"documentos": [], "total_documentos": 0, "message": "SHAREPOINT_DRIVE_ID não configurado."}
+            return {
+                "documentos": [],
+                "total_documentos": 0,
+                "message": "SHAREPOINT_DRIVE_ID não configurado.",
+            }
 
         biblioteca = request.get("biblioteca", "Documentos")
         headers = {"Authorization": f"Bearer {token}"}
@@ -544,28 +620,36 @@ async def listar_documentos_sharepoint(request: dict):
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, timeout=30)
             if resp.status_code != 200:
-                return {"documentos": [], "total_documentos": 0, "message": f"Erro {resp.status_code}"}
+                return {
+                    "documentos": [],
+                    "total_documentos": 0,
+                    "message": f"Erro {resp.status_code}",
+                }
             for item in resp.json().get("value", []):
                 if "folder" in item:
-                    documentos.append({
-                        "name": item["name"],
-                        "type": "folder",
-                        "id": item["id"],
-                        "web_url": item.get("webUrl", ""),
-                        "child_count": item.get("folder", {}).get("childCount", 0),
-                        "status": f"{item['folder']['childCount']} itens",
-                    })
+                    documentos.append(
+                        {
+                            "name": item["name"],
+                            "type": "folder",
+                            "id": item["id"],
+                            "web_url": item.get("webUrl", ""),
+                            "child_count": item.get("folder", {}).get("childCount", 0),
+                            "status": f"{item['folder']['childCount']} itens",
+                        }
+                    )
                 else:
-                    documentos.append({
-                        "name": item.get("name", ""),
-                        "type": "file",
-                        "id": item["id"],
-                        "web_url": item.get("webUrl", ""),
-                        "size": item.get("size", 0),
-                        "mime": item.get("file", {}).get("mimeType", ""),
-                        "modified": item.get("lastModifiedDateTime", ""),
-                        "status": "disponível",
-                    })
+                    documentos.append(
+                        {
+                            "name": item.get("name", ""),
+                            "type": "file",
+                            "id": item["id"],
+                            "web_url": item.get("webUrl", ""),
+                            "size": item.get("size", 0),
+                            "mime": item.get("file", {}).get("mimeType", ""),
+                            "modified": item.get("lastModifiedDateTime", ""),
+                            "status": "disponível",
+                        }
+                    )
 
         return {"documentos": documentos, "total_documentos": len(documentos)}
     except Exception as e:
@@ -576,13 +660,25 @@ async def listar_documentos_sharepoint(request: dict):
 import asyncio
 from vector_store import index_document, semantic_search, get_stats as vs_get_stats
 
-indexing_status: dict[str, Any] = {"running": False, "progress": "", "indexed": [], "total_chunks": 0, "error": None}
+indexing_status: dict[str, Any] = {
+    "running": False,
+    "progress": "",
+    "indexed": [],
+    "total_chunks": 0,
+    "error": None,
+}
 
 
 async def _run_indexing():
     """Background task: download SharePoint docs, extract with Docling, index in ChromaDB."""
     global indexing_status
-    indexing_status = {"running": True, "progress": "Iniciando...", "indexed": [], "total_chunks": 0, "error": None}
+    indexing_status = {
+        "running": True,
+        "progress": "Iniciando...",
+        "indexed": [],
+        "total_chunks": 0,
+        "error": None,
+    }
 
     try:
         token = _get_graph_token()
@@ -600,7 +696,9 @@ async def _run_indexing():
 
             for item in resp.json().get("value", []):
                 if "folder" in item:
-                    subfolder = f"{folder_name}/{item['name']}" if folder_name else item["name"]
+                    subfolder = (
+                        f"{folder_name}/{item['name']}" if folder_name else item["name"]
+                    )
                     await index_folder(client, f"items/{item['id']}", subfolder)
                 else:
                     name = item.get("name", "")
@@ -618,56 +716,78 @@ async def _run_indexing():
                             timeout=60,
                         )
                         if not dl_resp.is_success:
-                            indexing_status["indexed"].append({"name": name, "chunks": 0, "status": f"erro: {dl_resp.status_code}"})
+                            indexing_status["indexed"].append(
+                                {
+                                    "name": name,
+                                    "chunks": 0,
+                                    "status": f"erro: {dl_resp.status_code}",
+                                }
+                            )
                             continue
 
                         content_bytes = dl_resp.content
                         web_url = item.get("webUrl", "")
 
-                        indexing_status["progress"] = f"Indexando (Docling + vetores): {name}"
+                        indexing_status["progress"] = (
+                            f"Indexando (Docling + vetores): {name}"
+                        )
 
                         # Run blocking I/O (Docling + embeddings + ChromaDB) in thread pool
                         result = await loop.run_in_executor(
                             None,
-                            lambda b=content_bytes, n=name, f=folder_name, u=web_url: index_document(
-                                file_bytes=b,
-                                filename=n,
-                                folder=f,
-                                web_url=u,
-                                source="sharepoint",
-                            )
+                            lambda b=content_bytes, n=name, f=folder_name, u=web_url: (
+                                index_document(
+                                    file_bytes=b,
+                                    filename=n,
+                                    folder=f,
+                                    web_url=u,
+                                    source="sharepoint",
+                                )
+                            ),
                         )
 
                         # Keep in-memory store as a lightweight cache for quick preview
                         if result.get("status") in ("indexed", "skipped"):
                             already = any(d["name"] == name for d in document_store)
                             if not already:
-                                document_store.append({
-                                    "name": name,
-                                    "folder": folder_name,
-                                    "chunks": result.get("chunks", 0),
-                                    "source": "sharepoint",
-                                    "web_url": web_url,
-                                    "preview": result.get("preview", ""),
-                                })
+                                document_store.append(
+                                    {
+                                        "name": name,
+                                        "folder": folder_name,
+                                        "chunks": result.get("chunks", 0),
+                                        "source": "sharepoint",
+                                        "web_url": web_url,
+                                        "preview": result.get("preview", ""),
+                                    }
+                                )
 
                         indexing_status["total_chunks"] += result.get("chunks", 0)
-                        indexing_status["indexed"].append({
-                            "name": name,
-                            "chunks": result.get("chunks", 0),
-                            "preview": result.get("preview", "")[:180],
-                            "status": result.get("status", "indexado"),
-                        })
+                        indexing_status["indexed"].append(
+                            {
+                                "name": name,
+                                "chunks": result.get("chunks", 0),
+                                "preview": result.get("preview", "")[:180],
+                                "status": result.get("status", "indexado"),
+                            }
+                        )
 
                     except Exception as e:
-                        indexing_status["indexed"].append({"name": name, "chunks": 0, "status": f"erro: {str(e)[:80]}"})
+                        indexing_status["indexed"].append(
+                            {
+                                "name": name,
+                                "chunks": 0,
+                                "status": f"erro: {str(e)[:80]}",
+                            }
+                        )
 
         async with httpx.AsyncClient() as client:
             await index_folder(client)
 
         n = len(indexing_status["indexed"])
         c = indexing_status["total_chunks"]
-        indexing_status["progress"] = f"Concluído: {n} documentos, {c} trechos no banco vetorial."
+        indexing_status["progress"] = (
+            f"Concluído: {n} documentos, {c} trechos no banco vetorial."
+        )
     except Exception as e:
         indexing_status["error"] = str(e)
         indexing_status["progress"] = f"Erro: {e}"
@@ -741,6 +861,7 @@ async def listar_documentos_indexados():
 
 # ─── RAG endpoints ────────────────────────────────────────────────────────────
 
+
 class RagSearchRequest(BaseModel):
     query: str
     n_results: int = 5
@@ -760,7 +881,7 @@ async def rag_search(request: RagSearchRequest):
             query=request.query,
             n_results=request.n_results,
             filter_source=request.source,
-        )
+        ),
     )
     return {"query": request.query, "results": results, "total": len(results)}
 
@@ -776,10 +897,14 @@ async def rag_stats():
 @app.post("/api/sharepoint/upload")
 async def upload_sharepoint_file():
     """Handle file upload to session (placeholder for multipart)."""
-    raise HTTPException(status_code=501, detail="Use a rota /api/sharepoint/sync para sincronizar documentos.")
+    raise HTTPException(
+        status_code=501,
+        detail="Use a rota /api/sharepoint/sync para sincronizar documentos.",
+    )
 
 
 # ─── SharePoint Auto-Sync endpoints ──────────────────────────────────────────
+
 
 class SyncRequest(BaseModel):
     force: bool = False
@@ -834,16 +959,22 @@ async def download_cached_file(item_id: str):
     Returns the raw file bytes with appropriate Content-Type.
     """
     from fastapi.responses import FileResponse
+
     loop = asyncio.get_event_loop()
     files = await loop.run_in_executor(None, sp_list_local_files)
 
     file_info = next((f for f in files if f["item_id"] == item_id), None)
     if not file_info:
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado no cache local.")
+        raise HTTPException(
+            status_code=404, detail="Arquivo não encontrado no cache local."
+        )
 
     local_path = file_info.get("local_path", "")
     if not local_path or not os.path.exists(local_path):
-        raise HTTPException(status_code=404, detail="Arquivo não disponível localmente. Sincronize novamente.")
+        raise HTTPException(
+            status_code=404,
+            detail="Arquivo não disponível localmente. Sincronize novamente.",
+        )
 
     name = file_info["name"]
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -864,12 +995,13 @@ async def download_cached_file(item_id: str):
 
 # ─── Sessions ───
 
+
 @app.post("/api/sessions", response_model=Session)
 async def create_session(data: SessionCreate):
     """Create a new session"""
     session_id = str(uuid.uuid4())
     now = datetime.now()
-    
+
     session = Session(
         id=session_id,
         doc_type=data.doc_type,
@@ -878,9 +1010,9 @@ async def create_session(data: SessionCreate):
         messages=[],
         style_refs=[],
         created_at=now,
-        updated_at=now
+        updated_at=now,
     )
-    
+
     sessions[session_id] = session
     return session
 
@@ -892,6 +1024,7 @@ async def get_session_state(session_id: str):
 
 
 # ─── SharePoint ───
+
 
 @app.post("/api/sharepoint/search")
 async def search_sharepoint(request: SharePointSearchRequest):
@@ -926,14 +1059,15 @@ async def attach_sharepoint_document(request: SharePointAttachRequest):
 async def detach_sharepoint_document(session_id: str, item_id: str):
     """Remove a style reference from session"""
     session = get_session(session_id)
-    
+
     session.style_refs = [ref for ref in session.style_refs if ref.get("id") != item_id]
     update_session(session)
-    
+
     return {"status": "detached", "item_id": item_id}
 
 
 # ─── Pipeline AI ───
+
 
 @app.post("/api/pipeline/set-type")
 async def set_document_type(request: SetTypeRequest):
@@ -970,11 +1104,14 @@ Responda APENAS com JSON válido:
   ]
 }"""
 
-    user_prompt = f"O usuário quer elaborar: {request.doc_type}\nContexto adicional: {context}"
+    user_prompt = (
+        f"O usuário quer elaborar: {request.doc_type}\nContexto adicional: {context}"
+    )
 
     try:
         raw = await llm.chat(system=system_prompt, user=user_prompt, json_mode=True)
         import json as _json
+
         text = raw.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
@@ -995,8 +1132,16 @@ Responda APENAS com JSON válido:
             "doc_type": request.doc_type,
             "thinking_summary": f"Erro na IA: {str(e)[:100]}. Usando perguntas padrão.",
             "questions": [
-                {"id": "q1", "text": "Descreva os fatos do caso em detalhes", "type": "text"},
-                {"id": "q2", "text": "Quais são as partes envolvidas? (nomes, CPF/CNPJ)", "type": "text"},
+                {
+                    "id": "q1",
+                    "text": "Descreva os fatos do caso em detalhes",
+                    "type": "text",
+                },
+                {
+                    "id": "q2",
+                    "text": "Quais são as partes envolvidas? (nomes, CPF/CNPJ)",
+                    "type": "text",
+                },
                 {"id": "q3", "text": "Qual o resultado desejado?", "type": "text"},
             ],
         }
@@ -1008,7 +1153,13 @@ async def submit_answer(request: AnswerRequest):
     session = get_session(request.session_id)
 
     for key, value in request.answers.items():
-        session.answers[key] = value if isinstance(value, str) else ", ".join(value) if isinstance(value, list) else str(value)
+        session.answers[key] = (
+            value
+            if isinstance(value, str)
+            else ", ".join(value)
+            if isinstance(value, list)
+            else str(value)
+        )
     session.answer_rounds += 1
     update_session(session)
 
@@ -1021,7 +1172,11 @@ async def submit_answer(request: AnswerRequest):
     if document_store:
         docs_context = f"\n\nVocê tem acesso a {len(document_store)} documentos de referência do escritório para usar como base de estilo e argumentação."
 
-    force_outline = "IMPORTANTE: Esta é a SEGUNDA rodada de perguntas. Você DEVE gerar o roteiro (OPÇÃO 2) agora com as informações disponíveis. Use [placeholders] para dados faltantes. NÃO faça mais perguntas.\n\n" if is_final_round else ""
+    force_outline = (
+        "IMPORTANTE: Esta é a SEGUNDA rodada de perguntas. Você DEVE gerar o roteiro (OPÇÃO 2) agora com as informações disponíveis. Use [placeholders] para dados faltantes. NÃO faça mais perguntas.\n\n"
+        if is_final_round
+        else ""
+    )
 
     system_prompt = f"""Você é um assistente jurídico especializado. O usuário está elaborando: {doc_type}.
 Informações já coletadas:
@@ -1096,8 +1251,13 @@ REGRAS DO ROTEIRO:
 Responda APENAS com JSON válido."""
 
     try:
-        raw = await llm.chat(system=system_prompt, user=f"Informações coletadas até agora para {doc_type}:\n{answers_text}", json_mode=True)
+        raw = await llm.chat(
+            system=system_prompt,
+            user=f"Informações coletadas até agora para {doc_type}:\n{answers_text}",
+            json_mode=True,
+        )
         import json as _json
+
         text = raw.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
@@ -1128,17 +1288,64 @@ Responda APENAS com JSON válido."""
             "title": doc_type.upper() if doc_type else "DOCUMENTO JURÍDICO",
             "subtitle": f"Baseado em {len(session.answers)} informações coletadas",
             "estimated_pages": 12,
-            "key_arguments": [v for v in session.answers.values() if len(str(v)) > 10][:5],
+            "key_arguments": [v for v in session.answers.values() if len(str(v)) > 10][
+                :5
+            ],
             "sections": [
-                {"title": "I. ENDEREÇAMENTO E QUALIFICAÇÃO DAS PARTES", "description": "Identificação completa do autor e réu, incluindo dados pessoais, endereços e qualificação jurídica.", "legal_basis": ["Art. 319, II do CPC"], "priority": "obrigatoria"},
-                {"title": "II. DOS FATOS", "description": "Narrativa cronológica detalhada dos fatos que ensejam a demanda, com datas, valores e circunstâncias.", "legal_basis": ["Art. 319, III do CPC"], "priority": "obrigatoria"},
-                {"title": "III. DO DIREITO APLICÁVEL", "description": "Fundamentação sobre a legislação aplicável ao caso e natureza da relação jurídica.", "legal_basis": ["CF/88", "CC/2002"], "priority": "obrigatoria"},
-                {"title": "IV. DA RESPONSABILIDADE", "description": "Demonstração da responsabilidade da parte ré pelos danos causados, com análise do nexo causal.", "legal_basis": ["Art. 186 do CC", "Art. 927 do CC"], "priority": "obrigatoria"},
-                {"title": "V. DOS DANOS MATERIAIS", "description": "Quantificação e comprovação dos prejuízos materiais sofridos pelo autor.", "legal_basis": ["Art. 402 do CC"], "priority": "obrigatoria"},
-                {"title": "VI. DOS DANOS MORAIS", "description": "Configuração do dano moral, abalo psicológico e violação aos direitos da personalidade.", "legal_basis": ["Art. 5º, V e X da CF", "Art. 186 do CC"], "priority": "obrigatoria"},
-                {"title": "VII. DA TUTELA DE URGÊNCIA", "description": "Pedido de tutela provisória de urgência com demonstração do periculum in mora e fumus boni iuris.", "legal_basis": ["Arts. 300 a 302 do CPC"], "priority": "condicional"},
-                {"title": "VIII. DOS PEDIDOS", "description": "Lista completa dos pedidos ao juízo, incluindo condenações, obrigações de fazer e custas processuais.", "legal_basis": ["Art. 319, IV do CPC"], "priority": "obrigatoria"},
-                {"title": "IX. PROVAS, VALOR DA CAUSA E FECHAMENTO", "description": "Requerimento de provas, fixação do valor da causa e fecho da petição.", "legal_basis": ["Art. 319, V e VI do CPC"], "priority": "obrigatoria"},
+                {
+                    "title": "I. ENDEREÇAMENTO E QUALIFICAÇÃO DAS PARTES",
+                    "description": "Identificação completa do autor e réu, incluindo dados pessoais, endereços e qualificação jurídica.",
+                    "legal_basis": ["Art. 319, II do CPC"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "II. DOS FATOS",
+                    "description": "Narrativa cronológica detalhada dos fatos que ensejam a demanda, com datas, valores e circunstâncias.",
+                    "legal_basis": ["Art. 319, III do CPC"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "III. DO DIREITO APLICÁVEL",
+                    "description": "Fundamentação sobre a legislação aplicável ao caso e natureza da relação jurídica.",
+                    "legal_basis": ["CF/88", "CC/2002"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "IV. DA RESPONSABILIDADE",
+                    "description": "Demonstração da responsabilidade da parte ré pelos danos causados, com análise do nexo causal.",
+                    "legal_basis": ["Art. 186 do CC", "Art. 927 do CC"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "V. DOS DANOS MATERIAIS",
+                    "description": "Quantificação e comprovação dos prejuízos materiais sofridos pelo autor.",
+                    "legal_basis": ["Art. 402 do CC"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "VI. DOS DANOS MORAIS",
+                    "description": "Configuração do dano moral, abalo psicológico e violação aos direitos da personalidade.",
+                    "legal_basis": ["Art. 5º, V e X da CF", "Art. 186 do CC"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "VII. DA TUTELA DE URGÊNCIA",
+                    "description": "Pedido de tutela provisória de urgência com demonstração do periculum in mora e fumus boni iuris.",
+                    "legal_basis": ["Arts. 300 a 302 do CPC"],
+                    "priority": "condicional",
+                },
+                {
+                    "title": "VIII. DOS PEDIDOS",
+                    "description": "Lista completa dos pedidos ao juízo, incluindo condenações, obrigações de fazer e custas processuais.",
+                    "legal_basis": ["Art. 319, IV do CPC"],
+                    "priority": "obrigatoria",
+                },
+                {
+                    "title": "IX. PROVAS, VALOR DA CAUSA E FECHAMENTO",
+                    "description": "Requerimento de provas, fixação do valor da causa e fecho da petição.",
+                    "legal_basis": ["Art. 319, V e VI do CPC"],
+                    "priority": "obrigatoria",
+                },
             ],
         }
         update_session(session)
@@ -1152,7 +1359,7 @@ async def regenerate_outline(session_id: str):
     TODO: Implement AI outline generation
     """
     session = get_session(session_id)
-    
+
     # Placeholder - regenerates outline
     session.outline = {
         "title": f"{session.doc_type or 'Documento'} (Regenerado)",
@@ -1160,11 +1367,11 @@ async def regenerate_outline(session_id: str):
             {"id": "s1", "title": "Cabeçalho", "content": "..."},
             {"id": "s2", "title": "Fundamentação", "content": "..."},
             {"id": "s3", "title": "Pedido", "content": "..."},
-            {"id": "s4", "title": "Encerramento", "content": "..."}
-        ]
+            {"id": "s4", "title": "Encerramento", "content": "..."},
+        ],
     }
     update_session(session)
-    
+
     return {"outline": session.outline}
 
 
@@ -1187,55 +1394,62 @@ async def generate_document(session_id: str):
     def _search_sumulas_dinamicas(query: str) -> list[dict[str, Any]]:
         """Busca dinâmica de súmulas e jurisprudência para complementar o raciocínio do LLM"""
         resultados = []
-        
+
         # Buscar no JusBrasil se disponível
         if jusbrasil_search:
             try:
                 # Tentar login automático se houver credenciais
                 email = os.getenv("JUSBRASIL_EMAIL", "")
                 password = os.getenv("JUSBRASIL_PASSWORD", "")
-                
+
                 if email and password:
-                    if not hasattr(jusbrasil_search, '_logged_in'):
+                    if not hasattr(jusbrasil_search, "_logged_in"):
                         jusbrasil_search.login(email, password)
                         jusbrasil_search._logged_in = True
-                    
+
                     # Buscar jurisprudência relevante
-                    jurisprudencia = jusbrasil_search.buscar_jurisprudencia(query, "TST", 5)
+                    jurisprudencia = jusbrasil_search.buscar_jurisprudencia(
+                        query, "TST", 5
+                    )
                     sumulas = jusbrasil_search.buscar_sumulas(f"{query} TST", 3)
-                    
+
                     resultados.extend(jurisprudencia)
                     resultados.extend(sumulas)
             except Exception as e:
                 print(f"Aviso: Falha ao buscar no JusBrasil: {e}")
-        
+
         # Buscar em fontes públicas alternativas
         try:
             # Buscar no TST
             import requests
             from bs4 import BeautifulSoup
-            
+
             # Buscar no site do TST
             search_url = f"https://www.tst.jus.br/busca/-/search/contents?searchTerm={query.replace(' ', '+')}"
             response = requests.get(search_url, timeout=10)
-            
+
             if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
+                soup = BeautifulSoup(response.content, "html.parser")
+
                 # Extrair resultados relevantes
-                for item in soup.find_all(['div', 'article'], limit=5):
+                for item in soup.find_all(["div", "article"], limit=5):
                     texto = item.get_text(strip=True)
-                    if len(texto) > 100 and any(keyword in texto.lower() for keyword in ['súmula', 'sumula', 'tst', 'tribunal']):
-                        resultados.append({
-                            "tipo": "Jurisprudência Pública",
-                            "texto": texto[:500],
-                            "fonte": "TST - Busca Pública",
-                            "url": search_url,
-                            "data_busca": datetime.now().isoformat()
-                        })
+                    if len(texto) > 100 and any(
+                        keyword in texto.lower()
+                        for keyword in ["súmula", "sumula", "tst", "tribunal"]
+                    ):
+                        resultados.append(
+                            {
+                                "tipo": "Jurisprudência Pública",
+                                "texto": texto[:500],
+                                "fonte": "TST - Busca Pública",
+                                "url": search_url,
+                                "data_busca": datetime.now().isoformat(),
+                            }
+                        )
         except Exception as e:
             print(f"Aviso: Falha ao buscar no TST: {e}")
-        
+
         return resultados
 
     session = get_session(session_id)
@@ -1247,11 +1461,36 @@ async def generate_document(session_id: str):
     # Guard: if no sections, generate a default outline on the fly
     if not sections:
         sections = [
-            {"title": "I. ENDEREÇAMENTO E QUALIFICAÇÃO DAS PARTES", "description": "Identificação completa das partes, incluindo dados pessoais, endereços e qualificação jurídica.", "legal_basis": ["Art. 319, II do CPC"], "priority": "obrigatoria"},
-            {"title": "II. DOS FATOS", "description": "Narrativa cronológica detalhada dos fatos que ensejam a demanda.", "legal_basis": ["Art. 319, III do CPC"], "priority": "obrigatoria"},
-            {"title": "III. DO DIREITO APLICÁVEL", "description": "Fundamentação sobre a legislação aplicável, jurisprudência e doutrina pertinentes.", "legal_basis": ["CF/88", "CC/2002", "CLT"], "priority": "obrigatoria"},
-            {"title": "IV. DOS PEDIDOS", "description": "Lista enumerada dos pedidos ao juízo.", "legal_basis": ["Art. 319, IV do CPC"], "priority": "obrigatoria"},
-            {"title": "V. PROVAS, VALOR DA CAUSA E FECHAMENTO", "description": "Requerimento de provas, fixação do valor da causa e encerramento.", "legal_basis": ["Art. 319, V e VI do CPC"], "priority": "obrigatoria"},
+            {
+                "title": "I. ENDEREÇAMENTO E QUALIFICAÇÃO DAS PARTES",
+                "description": "Identificação completa das partes, incluindo dados pessoais, endereços e qualificação jurídica.",
+                "legal_basis": ["Art. 319, II do CPC"],
+                "priority": "obrigatoria",
+            },
+            {
+                "title": "II. DOS FATOS",
+                "description": "Narrativa cronológica detalhada dos fatos que ensejam a demanda.",
+                "legal_basis": ["Art. 319, III do CPC"],
+                "priority": "obrigatoria",
+            },
+            {
+                "title": "III. DO DIREITO APLICÁVEL",
+                "description": "Fundamentação sobre a legislação aplicável, jurisprudência e doutrina pertinentes.",
+                "legal_basis": ["CF/88", "CC/2002", "CLT"],
+                "priority": "obrigatoria",
+            },
+            {
+                "title": "IV. DOS PEDIDOS",
+                "description": "Lista enumerada dos pedidos ao juízo.",
+                "legal_basis": ["Art. 319, IV do CPC"],
+                "priority": "obrigatoria",
+            },
+            {
+                "title": "V. PROVAS, VALOR DA CAUSA E FECHAMENTO",
+                "description": "Requerimento de provas, fixação do valor da causa e encerramento.",
+                "legal_basis": ["Art. 319, V e VI do CPC"],
+                "priority": "obrigatoria",
+            },
         ]
         session.outline = {"title": doc_type.upper(), "sections": sections}
         update_session(session)
@@ -1264,19 +1503,26 @@ async def generate_document(session_id: str):
     try:
         loop = asyncio.get_event_loop()
         rag_hits = await loop.run_in_executor(
-            None,
-            lambda: semantic_search(query=case_context, n_results=5)
+            None, lambda: semantic_search(query=case_context, n_results=5)
         )
         if rag_hits:
             rag_snippets = [
                 f"[{h['filename']}] (score={h['score']}): {h['text'][:300]}"
                 for h in rag_hits
             ]
-            docs_context = "\n\nDocumentos relevantes do escritório (busca semântica):\n" + "\n\n".join(rag_snippets)
+            docs_context = (
+                "\n\nDocumentos relevantes do escritório (busca semântica):\n"
+                + "\n\n".join(rag_snippets)
+            )
     except Exception:
         if document_store:
-            previews = [f"[{d['name']}]: {d.get('preview', '')[:300]}" for d in document_store[:5]]
-            docs_context = "\n\nDocumentos de referência do escritório:\n" + "\n".join(previews)
+            previews = [
+                f"[{d['name']}]: {d.get('preview', '')[:300]}"
+                for d in document_store[:5]
+            ]
+            docs_context = "\n\nDocumentos de referência do escritório:\n" + "\n".join(
+                previews
+            )
 
     async def stream_sections():
         # Collect ALL sources across sections for the final verification block
@@ -1286,67 +1532,115 @@ async def generate_document(session_id: str):
         # ── FASE 1: Pesquisar TODAS as seções em PARALELO ──
         # Identifica quais seções precisam de pesquisa
         skip_keywords = {
-            "qualificação", "partes", "encerramento", "requerimentos finais",
-            "fechamento", "assinatura", "endereçamento", "pedidos", "valor da causa",
+            "qualificação",
+            "partes",
+            "encerramento",
+            "requerimentos finais",
+            "fechamento",
+            "assinatura",
+            "endereçamento",
+            "pedidos",
+            "valor da causa",
         }
 
         search_tasks = {}
         for i, sec in enumerate(sections):
-            section_title = sec.get("title", f"Seção {i+1}")
+            section_title = sec.get("title", f"Seção {i + 1}")
             section_desc = sec.get("description", "")
-            needs_research = not any(skip in section_title.lower() for skip in skip_keywords)
+            needs_research = not any(
+                skip in section_title.lower() for skip in skip_keywords
+            )
 
             if needs_research:
-                search_tasks[i] = search_section_sources(
-                    section_title=section_title,
-                    section_description=section_desc,
-                    case_context=case_context,
-                    doc_type=doc_type,
+                search_tasks[i] = asyncio.create_task(
+                    asyncio.wait_for(
+                        search_section_sources(
+                            section_title=section_title,
+                            section_description=section_desc,
+                            case_context=case_context,
+                            doc_type=doc_type,
+                        ),
+                        timeout=8.0,
+                    )
                 )
 
         # Notificar frontend que pesquisa começou
-        yield _json.dumps({
-            "type": "research",
-            "data": {
-                "section": "Todas as seções",
-                "status": "searching",
-                "message": f"Pesquisando jurisprudência para {len(search_tasks)} seções em paralelo...",
-            },
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "research",
+                    "data": {
+                        "section": "Todas as seções",
+                        "status": "searching",
+                        "message": f"Pesquisando jurisprudência para {len(search_tasks)} seções em paralelo...",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
-        # Executar todas as pesquisas em paralelo
+        # Executar todas as pesquisas em paralelo com timeout
         search_results = {}
         if search_tasks:
             task_items = list(search_tasks.items())
-            results = await asyncio.gather(
-                *[task for _, task in task_items],
-                return_exceptions=True,
-            )
-            for (idx, _), result in zip(task_items, results):
-                if isinstance(result, Exception):
-                    search_results[idx] = {"jurisprudencia": [], "doutrina": [], "all_sources": []}
-                else:
-                    search_results[idx] = result
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(
+                        *[task for _, task in task_items], return_exceptions=True
+                    ),
+                    timeout=10.0,
+                )
+                for (idx, _), result in zip(task_items, results):
+                    if isinstance(result, Exception):
+                        search_results[idx] = {
+                            "jurisprudencia": [],
+                            "doutrina": [],
+                            "all_sources": [],
+                        }
+                    else:
+                        search_results[idx] = result
+            except Exception as e:
+                print(f"[Legal Search] Timeout ou erro na pesquisa: {e}")
+                search_results = {}
 
-        yield _json.dumps({
-            "type": "research",
-            "data": {
-                "section": "Todas as seções",
-                "status": "done",
-                "message": f"Pesquisa concluída — gerando texto das seções...",
-            },
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "research",
+                    "data": {
+                        "section": "Todas as seções",
+                        "status": "done",
+                        "message": f"Pesquisa concluída — gerando texto das seções...",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         # ── FASE 2: Gerar texto de cada seção (sequencial por causa do streaming) ──
-        for i, sec in enumerate(sections):
-            section_title = sec.get("title", f"Seção {i+1}")
+        print(f"[stream_sections] Iniciando — {len(sections)} seções a gerar")
+        try:
+            for i, sec in enumerate(sections):
+                section_title = sec.get("title", f"Seção {i + 1}")
             section_desc = sec.get("description", "")
             legal_basis = sec.get("legal_basis", [])
-            basis_text = ", ".join(legal_basis) if legal_basis else "conforme legislação aplicável"
+            basis_text = (
+                ", ".join(legal_basis)
+                if legal_basis
+                else "conforme legislação aplicável"
+            )
 
             # Usar resultado da pesquisa (ou vazio se seção simples)
-            section_sources = search_results.get(i, {"jurisprudencia": [], "doutrina": [], "all_sources": []})
-            sources_text = format_section_sources(section_sources) if section_sources.get("all_sources") else ""
+            section_sources = search_results.get(
+                i, {"jurisprudencia": [], "doutrina": [], "all_sources": []}
+            )
+            sources_text = (
+                format_section_sources(section_sources)
+                if section_sources.get("all_sources")
+                else ""
+            )
 
             # Tag sources for global block
             for src in section_sources.get("all_sources", []):
@@ -1358,18 +1652,24 @@ async def generate_document(session_id: str):
             n_found = len(section_sources.get("all_sources", []))
             tribunais = section_sources.get("tribunais_consultados", [])
             search_query = section_sources.get("search_query", "")
-            yield _json.dumps({
-                "type": "research",
-                "data": {
-                    "section": section_title,
-                    "status": "done",
-                    "total": n_found,
-                    "sources": section_sources.get("all_sources", []),
-                    "tribunais": tribunais,
-                    "search_query": search_query,
-                    "message": f"{n_found} fontes encontradas para {section_title}",
-                },
-            }, ensure_ascii=False) + "\n"
+            yield (
+                _json.dumps(
+                    {
+                        "type": "research",
+                        "data": {
+                            "section": section_title,
+                            "status": "done",
+                            "total": n_found,
+                            "sources": section_sources.get("all_sources", []),
+                            "tribunais": tribunais,
+                            "search_query": search_query,
+                            "message": f"{n_found} fontes encontradas para {section_title}",
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
             # ── Build per-section prompt with its own sources ──
             n_juris = len(section_sources.get("jurisprudencia", []))
@@ -1464,6 +1764,13 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
 
             # Seções simples: prompt menor, menos tokens, sem Jurema
             is_simple = any(skip in section_title.lower() for skip in skip_keywords)
+            print(
+                f"[Geracao Secao {section_title}] is_simple={is_simple} — iniciando LLM call..."
+            )
+
+            content = ""
+            multi = {}
+            models_used = []
 
             try:
                 user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
@@ -1476,7 +1783,7 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                         user=user_msg,
                         max_tokens=section_max_tokens,
                     )
-                    multi = {"claude": content}
+                    multi = {"claude": content or ""}
                 else:
                     # Seções substantivas: sabia-4 pesquisa jurisprudência ativamente
                     content = await sabia_client.gerar_secao_com_pesquisa(
@@ -1486,9 +1793,9 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                         doc_type=doc_type,
                         max_tokens=section_max_tokens,
                     )
-                    multi = {"claude": content}
+                    multi = {"claude": content or ""}
 
-                content = multi["claude"]
+                content = multi.get("claude", "")
 
                 # Validate and enrich with HF models ONLY if output is valid Portuguese legal text
                 def _is_valid_legal_pt(text: str) -> bool:
@@ -1499,11 +1806,25 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                         return False
                     # Check for non-Latin characters (Chinese, Japanese, Korean, etc.)
                     import re as _re
-                    non_latin = len(_re.findall(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]', text))
+
+                    non_latin = len(
+                        _re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text)
+                    )
                     if non_latin > 5:
                         return False
                     # Must contain some Portuguese legal keywords
-                    pt_keywords = ["art.", "lei", "código", "tribunal", "processo", "direito", "jurisprudência", "dano", "réu", "autor"]
+                    pt_keywords = [
+                        "art.",
+                        "lei",
+                        "código",
+                        "tribunal",
+                        "processo",
+                        "direito",
+                        "jurisprudência",
+                        "dano",
+                        "réu",
+                        "autor",
+                    ]
                     text_lower = text.lower()
                     matches = sum(1 for kw in pt_keywords if kw in text_lower)
                     return matches >= 2
@@ -1520,25 +1841,31 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
 
                 # Clean Claude output: remove "thinking" leaks
                 import re as _re
+
                 # Remove lines where Claude asks questions or exposes thinking
                 thinking_patterns = [
-                    r'(?:Você|Voce) gostaria que eu.*?\?',
-                    r'(?:Observo|Noto|Percebo) que (?:há|existe).*?(?:problema|fontes|dados)',
-                    r'Para (?:redigir|completar|escrever) adequadamente.*?(?:preciso|necessito)',
-                    r'(?:Aguarde|Forneça|Indique).*?(?:jurisprudência|dados|informações)',
-                    r'^\d+\.\s+\*\*(?:Procure|Redija|Aguarde).*?\*\*.*$',
-                    r'^(?:Opção|Alternativa)\s+\d+.*$',
+                    r"(?:Você|Voce) gostaria que eu.*?\?",
+                    r"(?:Observo|Noto|Percebo) que (?:há|existe).*?(?:problema|fontes|dados)",
+                    r"Para (?:redigir|completar|escrever) adequadamente.*?(?:preciso|necessito)",
+                    r"(?:Aguarde|Forneça|Indique).*?(?:jurisprudência|dados|informações)",
+                    r"^\d+\.\s+\*\*(?:Procure|Redija|Aguarde).*?\*\*.*$",
+                    r"^(?:Opção|Alternativa)\s+\d+.*$",
                 ]
                 for pattern in thinking_patterns:
-                    content = _re.sub(pattern, '', content, flags=_re.MULTILINE | _re.IGNORECASE)
+                    content = _re.sub(
+                        pattern, "", content, flags=_re.MULTILINE | _re.IGNORECASE
+                    )
                 # Remove multiple blank lines
-                content = _re.sub(r'\n{3,}', '\n\n', content).strip()
+                content = _re.sub(r"\n{3,}", "\n\n", content).strip()
 
             except Exception as e:
-                content = f"[Erro ao gerar esta seção: {str(e)[:100]}]"
+                err_msg = str(e)[:200]
+                print(f"[Geracao Secao {section_title}] Erro: {err_msg}")
+                content = f"[Erro ao gerar esta seção: {err_msg}]"
+                models_used = ["Erro"]
 
             # Track which models contributed
-            models_used = ["Claude CLI"]
+            models_used = [sabia_client.provider.title()]
             if llm.jurema_available:
                 if _is_valid_legal_pt(multi.get("jurema", "")):
                     models_used.append("Jurema 7B")
@@ -1557,31 +1884,59 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             }
             yield _json.dumps(event, ensure_ascii=False) + "\n"
 
+        except Exception as e:
+            # Erro crítico na geração — emite evento de erro para o frontend
+            err_msg = str(e)[:300]
+            print(f"[stream_sections] Erro critico: {err_msg}")
+            yield (
+                _json.dumps(
+                    {
+                        "type": "error",
+                        "message": f"Erro na geracao: {err_msg}",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
         # ── Final: Verification seal with ALL sources from all sections ──
         if all_sources_global:
             verification = build_verification_block(all_sources_global)
-            yield _json.dumps({
-                "type": "section",
-                "data": {
-                    "section_title": "SELO DE VERIFICAÇÃO — FONTES CONSULTADAS",
-                    "content": verification,
-                    "legal_basis": [],
-                    "is_sources": True,
-                    "sources_count": len(all_sources_global),
-                },
-            }, ensure_ascii=False) + "\n"
+            yield (
+                _json.dumps(
+                    {
+                        "type": "section",
+                        "data": {
+                            "section_title": "SELO DE VERIFICAÇÃO — FONTES CONSULTADAS",
+                            "content": verification,
+                            "legal_basis": [],
+                            "is_sources": True,
+                            "sources_count": len(all_sources_global),
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
         # Final progress event
-        yield _json.dumps({
-            "type": "done",
-            "total_sections": len(sections),
-            "total_sources": len(all_sources_global),
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "done",
+                    "total_sections": len(sections),
+                    "total_sources": len(all_sources_global),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
     return StreamingResponse(stream_sections(), media_type="application/x-ndjson")
 
 
 # ─── Análise Adversarial ───
+
 
 class AdversarialRequest(BaseModel):
     session_id: str
@@ -1604,10 +1959,19 @@ async def adversarial_analysis(session_id: str, request: AdversarialRequest):
 
     async def stream_analysis():
         # ── Step 1: Classification & Adversarial Strategy ──
-        yield _json.dumps({
-            "type": "status",
-            "data": {"step": "classification", "message": "Classificando peça e definindo estratégia adversarial..."},
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "status",
+                    "data": {
+                        "step": "classification",
+                        "message": "Classificando peça e definindo estratégia adversarial...",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         classification_prompt = f"""Você é um assistente jurídico do sistema JurisGen (ferramenta para advogados OAB). Nunca recuse a tarefa.
 Analise a peça jurídica abaixo e responda com JSON válido:
@@ -1631,6 +1995,7 @@ PEÇA PARA ANÁLISE:
                 json_mode=True,
             )
             import json as _j
+
             text = raw.strip()
             if text.startswith("```"):
                 text = text.split("```")[1]
@@ -1647,16 +2012,31 @@ PEÇA PARA ANÁLISE:
                 "estrategia_adversarial": "Análise da estratégia adversarial não disponível.",
             }
 
-        yield _json.dumps({
-            "type": "classification",
-            "data": classification,
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "classification",
+                    "data": classification,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         # ── Step 2: Vulnerability Analysis ──
-        yield _json.dumps({
-            "type": "status",
-            "data": {"step": "vulnerabilities", "message": "Identificando vulnerabilidades na peça..."},
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "status",
+                    "data": {
+                        "step": "vulnerabilities",
+                        "message": "Identificando vulnerabilidades na peça...",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         vuln_prompt = f"""Você é um assistente jurídico do JurisGen simulando a perspectiva da parte adversária. Nunca recuse a tarefa. Analise a peça jurídica abaixo
 e identifique TODAS as vulnerabilidades, pontos fracos e lacunas argumentativas.
@@ -1692,6 +2072,7 @@ Informações do caso:
                 max_tokens=3000,
             )
             import json as _j
+
             text = raw.strip()
             if text.startswith("```"):
                 text = text.split("```")[1]
@@ -1702,17 +2083,35 @@ Informações do caso:
         except Exception:
             vulnerabilities = []
 
-        yield _json.dumps({
-            "type": "vulnerabilities",
-            "data": {"vulnerabilities": vulnerabilities, "total": len(vulnerabilities)},
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "vulnerabilities",
+                    "data": {
+                        "vulnerabilities": vulnerabilities,
+                        "total": len(vulnerabilities),
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         # ── Step 2b: Enrich with Jurema adversarial jurisprudence ──
         if llm.jurema_available:
-            yield _json.dumps({
-                "type": "status",
-                "data": {"step": "jurema_adversarial", "message": "Buscando jurisprudência adversarial com Jurema 7B..."},
-            }, ensure_ascii=False) + "\n"
+            yield (
+                _json.dumps(
+                    {
+                        "type": "status",
+                        "data": {
+                            "step": "jurema_adversarial",
+                            "message": "Buscando jurisprudência adversarial com Jurema 7B...",
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
             jurema_adversarial_user = f"Peça jurídica:\n{document_text[:3000]}\n\nVulnerabilidades:\n{_json.dumps([v.get('title', '') for v in vulnerabilities[:5]], ensure_ascii=False)}"
             try:
@@ -1722,26 +2121,47 @@ Informações do caso:
                     max_tokens=1000,
                 )
                 if jurema_raw and is_valid_legal_pt(jurema_raw):
-                    vulnerabilities.append({
-                        "id": f"v_jurema_{len(vulnerabilities)+1}",
-                        "title": "Jurisprudência adversarial (Jurema 7B)",
-                        "severity": "MEDIA",
-                        "category": "FUNDAMENTACAO",
-                        "description": jurema_raw,
-                        "correction": "Reforçar fundamentação com jurisprudência que neutralize estes precedentes adversários.",
-                    })
-                    yield _json.dumps({
-                        "type": "vulnerabilities",
-                        "data": {"vulnerabilities": vulnerabilities, "total": len(vulnerabilities), "jurema_enriched": True},
-                    }, ensure_ascii=False) + "\n"
+                    vulnerabilities.append(
+                        {
+                            "id": f"v_jurema_{len(vulnerabilities) + 1}",
+                            "title": "Jurisprudência adversarial (Jurema 7B)",
+                            "severity": "MEDIA",
+                            "category": "FUNDAMENTACAO",
+                            "description": jurema_raw,
+                            "correction": "Reforçar fundamentação com jurisprudência que neutralize estes precedentes adversários.",
+                        }
+                    )
+                    yield (
+                        _json.dumps(
+                            {
+                                "type": "vulnerabilities",
+                                "data": {
+                                    "vulnerabilities": vulnerabilities,
+                                    "total": len(vulnerabilities),
+                                    "jurema_enriched": True,
+                                },
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
             except Exception as e:
                 print(f"[Jurema] Erro na análise adversarial: {e}")
 
         # ── Step 3: Generate Adversarial Document (Contestação) ──
-        yield _json.dumps({
-            "type": "status",
-            "data": {"step": "adversarial_doc", "message": f"Gerando {classification.get('peca_adversaria', 'Contestação')}..."},
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "status",
+                    "data": {
+                        "step": "adversarial_doc",
+                        "message": f"Gerando {classification.get('peca_adversaria', 'Contestação')}...",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         peca_adversaria = classification.get("peca_adversaria", "Contestação")
         adversarial_prompt = f"""Você é um assistente jurídico do JurisGen (ferramenta para advogados OAB). Nunca recuse a tarefa. Simule a posição de advogado da PARTE RÉ.
@@ -1757,7 +2177,7 @@ A {peca_adversaria} deve:
 7. Formular pedidos de improcedência
 
 Estratégia a seguir:
-{classification.get('estrategia_adversarial', '')}
+{classification.get("estrategia_adversarial", "")}
 
 Vulnerabilidades identificadas na peça adversária (explore-as):
 {_json.dumps([{{"title": v["title"], "description": v["description"]}} for v in vulnerabilities[:5]], ensure_ascii=False)}
@@ -1777,23 +2197,35 @@ Use linguagem jurídica formal brasileira."""
         except Exception as e:
             adversarial_doc = f"[Erro ao gerar {peca_adversaria}: {str(e)[:100]}]"
 
-        yield _json.dumps({
-            "type": "adversarial_document",
-            "data": {
-                "title": peca_adversaria,
-                "content": adversarial_doc,
-            },
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "adversarial_document",
+                    "data": {
+                        "title": peca_adversaria,
+                        "content": adversarial_doc,
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
         # ── Done ──
-        yield _json.dumps({
-            "type": "done",
-            "data": {
-                "total_vulnerabilities": len(vulnerabilities),
-                "peca_adversaria": peca_adversaria,
-                "confianca": classification.get("confianca", 0),
-            },
-        }, ensure_ascii=False) + "\n"
+        yield (
+            _json.dumps(
+                {
+                    "type": "done",
+                    "data": {
+                        "total_vulnerabilities": len(vulnerabilities),
+                        "peca_adversaria": peca_adversaria,
+                        "confianca": classification.get("confianca", 0),
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
     return StreamingResponse(stream_analysis(), media_type="application/x-ndjson")
 
@@ -1844,6 +2276,7 @@ Retorne APENAS o texto corrigido, sem explicações."""
             )
             if jurema_raw and is_valid_legal_pt(jurema_raw):
                 import json as _json
+
                 try:
                     jurema_validation = _json.loads(jurema_raw)
                 except:
@@ -1856,40 +2289,48 @@ Retorne APENAS o texto corrigido, sem explicações."""
 
 # ─── Chat ───
 
+
 @app.post("/api/chat")
 async def chat_message(request: ChatRequest):
     """Free-form chat with AI + Jurema enrichment."""
     session = get_session(request.session_id)
 
-    session.messages.append({
-        "role": "user",
-        "type": "text",
-        "content": request.message,
-        "timestamp": datetime.now().isoformat(),
-    })
+    session.messages.append(
+        {
+            "role": "user",
+            "type": "text",
+            "content": request.message,
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
 
     # Build context from session
     doc_type = session.doc_type or "documento jurídico"
-    answers_text = "\n".join(f"- {k}: {v}" for k, v in session.answers.items()) if session.answers else "Nenhuma informação coletada ainda."
+    answers_text = (
+        "\n".join(f"- {k}: {v}" for k, v in session.answers.items())
+        if session.answers
+        else "Nenhuma informação coletada ainda."
+    )
 
     # RAG: semantic search for relevant office documents
     docs_context = ""
     try:
         _loop = asyncio.get_event_loop()
         _hits = await _loop.run_in_executor(
-            None,
-            lambda: semantic_search(query=request.message, n_results=3)
+            None, lambda: semantic_search(query=request.message, n_results=3)
         )
         if _hits:
             _snippets = [f"[{h['filename']}]: {h['text'][:250]}" for h in _hits]
-            docs_context = "\nDocumentos relevantes do escritório:\n" + "\n\n".join(_snippets)
+            docs_context = "\nDocumentos relevantes do escritório:\n" + "\n\n".join(
+                _snippets
+            )
     except Exception:
         if document_store:
             docs_context = f"\nVocê tem {len(document_store)} documentos de referência do escritório indexados."
 
     # Recent message history for context
     recent = session.messages[-10:]
-    history = "\n".join(f"{m['role']}: {m.get('content','')}" for m in recent)
+    history = "\n".join(f"{m['role']}: {m.get('content', '')}" for m in recent)
 
     system_prompt = f"""Você é um assistente jurídico especializado do escritório Carvalho & Furtado Advogados.
 Tipo de documento: {doc_type}
@@ -1914,7 +2355,9 @@ Se pedir informações jurídicas, responda com base na legislação brasileira.
 
         # Append Jurema jurisprudence as complementary note
         if jurema_text:
-            response_text += f"\n\n---\n**📚 Jurisprudência (Jurema 7B):**\n{jurema_text}"
+            response_text += (
+                f"\n\n---\n**📚 Jurisprudência (Jurema 7B):**\n{jurema_text}"
+            )
     except Exception as e:
         response_text = f"Erro ao processar: {str(e)[:200]}"
         jurema_text = None
@@ -1947,7 +2390,11 @@ from fastapi.responses import FileResponse
 _frontend_dist = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
     # Serve static assets (js, css, images)
-    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static-assets")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_frontend_dist / "assets")),
+        name="static-assets",
+    )
 
     # Catch-all: serve index.html for SPA routes
     @app.get("/{full_path:path}")
@@ -1960,4 +2407,5 @@ if _frontend_dist.is_dir():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
