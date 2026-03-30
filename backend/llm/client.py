@@ -537,31 +537,10 @@ class LLMClient:
                         return await _fallback._chat_openai(
                             system, user, temperature, max_tokens
                         )
-                    elif os.getenv("ANTHROPIC_API_KEY"):
-                        print(
-                            f"[Claude CLI] Erro ({str(e)[:80]}). "
-                            f"Fallback automático → Anthropic API."
-                        )
-                        # Create a proper Anthropic client (not set up for claude_cli)
-                        _fallback = LLMClient(force_provider="anthropic")
-                        return await _fallback._chat_anthropic(
-                            system, user, temperature, max_tokens
-                        )
                 raise
         elif self.provider == "anthropic":
-            try:
-                return await self._chat_anthropic(system, user, temperature, max_tokens)
-            except Exception as e:
-                error_str = str(e).lower()
-                if "limit" in error_str or "resets" in error_str:
-                    if os.getenv("MARITACA_API_KEY"):
-                        print(
-                            f"[Anthropic API] Uso limitado. Fazendo fallback para sabia-4 (Maritaca)..."
-                        )
-                        return await self._chat_openai(
-                            system, user, temperature, max_tokens
-                        )
-                raise
+            # anthropic provider is redirected to Claude CLI
+            return await self._chat_claude_cli(system, user, json_mode)
         else:
             return await self._chat_openai(system, user, temperature, max_tokens)
 
@@ -1215,24 +1194,14 @@ def _make_sabia_client() -> "LLMClient":
     """Escolhe provider para geração de seções.
 
     Prioridade:
-    1. CLAUDE_AUTH_MODE=cli  → Claude CLI (assinatura Pro/Max)
-    2. ANTHROPIC_API_KEY     → Anthropic API direta
-    3. MARITACA_API_KEY      → sabia-4 (Maritaca)
-    4. fallback              → maritaca (erro claro de chave ausente)
+    1. Claude CLI (sempre preferido — usa ANTHROPIC_API_KEY ou OAuth)
+    2. MARITACA_API_KEY → sabia-4 como fallback de último recurso
     """
-    if os.getenv("CLAUDE_AUTH_MODE") == "cli":
-        return LLMClient(force_provider="claude_cli")
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return LLMClient(force_provider="anthropic")
-    if os.getenv("MARITACA_API_KEY"):
-        return LLMClient(force_provider="maritaca")
-    return LLMClient(force_provider="maritaca")
+    return LLMClient(force_provider="claude_cli")
 
 
 def _make_orchestrator() -> "LLMClient":
-    """Claude — orquestra perguntas, classifica tipo de peça e gera outline."""
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return LLMClient(force_provider="anthropic")
+    """Claude CLI — orquestra perguntas, classifica tipo de peça e gera outline."""
     return LLMClient(force_provider="claude_cli")
 
 
