@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from llm.client import LLMClient, is_valid_legal_pt
+from llm.client import LLMClient, is_valid_legal_pt, sabia_client, orchestrator_client
 llm = LLMClient()
 
 
@@ -442,8 +442,13 @@ async def health():
 
 @app.get("/api/llm/status")
 async def llm_status():
-    """Return LLM availability status"""
-    return {"available": True, "provider": "claude_cli", "message": "Claude disponível via backend."}
+    """Return LLM availability status for both models."""
+    sabia_status = await sabia_client.status()
+    orchestrator_status = await orchestrator_client.status()
+    return {
+        "petition_writer": {**sabia_status, "role": "Redação de seções + pesquisa de jurisprudência"},
+        "orchestrator": {**orchestrator_status, "role": "Classificação, perguntas e estrutura do documento"},
+    }
 
 
 @app.post("/api/cnj/search")
@@ -1419,20 +1424,23 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                 section_max_tokens = 1200 if is_simple else 3000
 
                 if is_simple:
-                    # Seções simples: só Claude, sem Jurema/LongCat (mais rápido)
-                    content = await llm.chat(
+                    # Seções simples: sabia-4 sem tool calling (mais rápido)
+                    content = await sabia_client.chat(
                         system=system_prompt,
                         user=user_msg,
                         max_tokens=section_max_tokens,
                     )
                     multi = {"claude": content}
                 else:
-                    multi = await llm.chat_multi(
+                    # Seções substantivas: sabia-4 pesquisa jurisprudência ativamente
+                    content = await sabia_client.gerar_secao_com_pesquisa(
                         system=system_prompt,
                         user=user_msg,
                         section_title=section_title,
+                        doc_type=doc_type,
                         max_tokens=section_max_tokens,
                     )
+                    multi = {"claude": content}
 
                 content = multi["claude"]
 
