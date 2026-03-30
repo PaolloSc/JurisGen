@@ -1772,6 +1772,36 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
             multi = {}
             models_used = []
 
+            # Validate and enrich with HF models ONLY if output is valid Portuguese legal text
+            def _is_valid_legal_pt(text: str) -> bool:
+                """Check if text is valid Portuguese legal content (not garbage/chinese/etc)."""
+                if not text or len(text) < 50:
+                    return False
+                if text.startswith("[Modelo"):
+                    return False
+                import re as _re
+
+                non_latin = len(
+                    _re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text)
+                )
+                if non_latin > 5:
+                    return False
+                pt_keywords = [
+                    "art.",
+                    "lei",
+                    "código",
+                    "tribunal",
+                    "processo",
+                    "direito",
+                    "jurisprudência",
+                    "dano",
+                    "réu",
+                    "autor",
+                ]
+                text_lower = text.lower()
+                matches = sum(1 for kw in pt_keywords if kw in text_lower)
+                return matches >= 2
+
             try:
                 user_msg = f"Redija a seção '{section_title}' da peça {doc_type}."
                 section_max_tokens = 1200 if is_simple else 3000
@@ -1796,38 +1826,6 @@ Escreva APENAS o conteúdo da seção, sem repetir o título. Comece diretamente
                     multi = {"claude": content or ""}
 
                 content = multi.get("claude", "")
-
-                # Validate and enrich with HF models ONLY if output is valid Portuguese legal text
-                def _is_valid_legal_pt(text: str) -> bool:
-                    """Check if text is valid Portuguese legal content (not garbage/chinese/etc)."""
-                    if not text or len(text) < 50:
-                        return False
-                    if text.startswith("[Modelo"):
-                        return False
-                    # Check for non-Latin characters (Chinese, Japanese, Korean, etc.)
-                    import re as _re
-
-                    non_latin = len(
-                        _re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text)
-                    )
-                    if non_latin > 5:
-                        return False
-                    # Must contain some Portuguese legal keywords
-                    pt_keywords = [
-                        "art.",
-                        "lei",
-                        "código",
-                        "tribunal",
-                        "processo",
-                        "direito",
-                        "jurisprudência",
-                        "dano",
-                        "réu",
-                        "autor",
-                    ]
-                    text_lower = text.lower()
-                    matches = sum(1 for kw in pt_keywords if kw in text_lower)
-                    return matches >= 2
 
                 jurema_extra = multi.get("jurema", "")
                 longcat_extra = multi.get("longcat", "")
