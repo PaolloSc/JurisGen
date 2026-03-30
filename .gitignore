@@ -16,6 +16,10 @@ backend/.env
 .env
 .envrc
 
+# Runtime data (gerado automaticamente)
+backend/.sessions.json
+backend/sharepoint_files/
+
 # IDE
 .vscode/
 .idea/
