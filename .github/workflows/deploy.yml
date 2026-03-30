@@ -1,4 +1,4 @@
-name: Build Check
+name: CI/CD
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +24,22 @@ jobs:
 
       - name: Verify build output
         run: ls -la dist/
+
+  deploy-backend:
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trigger Render Deploy
+        run: |
+          curl -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+        env:
+          CURL_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+
+# NOTE: Para ativar este passo:
+# 1. Abra https://dashboard.render.com → jurisgen-backend → Settings → Deploy Hooks
+# 2. Copie a URL do "Deploy Hook" (formato: https://api.render.com/v1/hooks/standard/xxx)
+# 3. No GitHub: Settings → Secrets and variables → Actions → New repository secret
+# 4. Nome: RENDER_DEPLOY_HOOK_URL, Valor: cole a URL do passo 2
