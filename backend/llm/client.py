@@ -24,7 +24,7 @@ JUREMA_REQUEST_TIMEOUT = int(os.getenv("JUREMA_REQUEST_TIMEOUT", "45"))
 
 async def _jurema_retry_delay(attempt: int) -> float:
     """Exponential backoff with jitter: 5s, 10s, 20s (max 60s) + 0-30% jitter."""
-    base = min(5 * (2 ** attempt), 60)
+    base = min(5 * (2**attempt), 60)
     jitter = random.uniform(0, base * 0.3)
     return base + jitter
 
@@ -35,12 +35,22 @@ def is_valid_legal_pt(text: str) -> bool:
         return False
     if text.startswith("[Modelo") or text.startswith("[Erro"):
         return False
-    non_latin = len(re.findall(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]', text))
+    non_latin = len(re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text))
     if non_latin > 5:
         return False
     pt_keywords = [
-        "art.", "lei", "código", "tribunal", "processo", "direito",
-        "jurisprudência", "dano", "réu", "autor", "súmula", "ementa",
+        "art.",
+        "lei",
+        "código",
+        "tribunal",
+        "processo",
+        "direito",
+        "jurisprudência",
+        "dano",
+        "réu",
+        "autor",
+        "súmula",
+        "ementa",
     ]
     text_lower = text.lower()
     matches = sum(1 for kw in pt_keywords if kw in text_lower)
@@ -87,7 +97,9 @@ class HuggingFaceClient:
         if self._jurema_consecutive_failures >= 3:
             self._jurema_cooldown_until = time.monotonic() + JUREMA_COOLDOWN_SECONDS
             self._jurema_half_open = True
-            print(f"[Jurema] Circuit breaker ativado — cooldown de {JUREMA_COOLDOWN_SECONDS}s (falhas consecutivas: {self._jurema_consecutive_failures})")
+            print(
+                f"[Jurema] Circuit breaker ativado — cooldown de {JUREMA_COOLDOWN_SECONDS}s (falhas consecutivas: {self._jurema_consecutive_failures})"
+            )
 
     def _jurema_mark_success(self):
         """Reset failure counter on success."""
@@ -153,12 +165,18 @@ class HuggingFaceClient:
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
-                is_loading = "503" in error_str or "loading" in error_str or "service unavailable" in error_str
+                is_loading = (
+                    "503" in error_str
+                    or "loading" in error_str
+                    or "service unavailable" in error_str
+                )
                 if is_loading:
                     self._stats["jurema_503s"] += 1
                 if is_loading and attempt < JUREMA_MAX_RETRIES - 1:
                     delay = await _jurema_retry_delay(attempt)
-                    print(f"[Jurema] Modelo carregando (tentativa {attempt + 1}) — retry em {delay:.1f}s...")
+                    print(
+                        f"[Jurema] Modelo carregando (tentativa {attempt + 1}) — retry em {delay:.1f}s..."
+                    )
                     await asyncio.sleep(delay)
                     continue
                 print(f"[Jurema] Erro na tentativa {attempt + 1}: {e}")
@@ -167,12 +185,16 @@ class HuggingFaceClient:
             # Delay between retries (exponential backoff)
             if attempt < JUREMA_MAX_RETRIES - 1:
                 delay = await _jurema_retry_delay(attempt)
-                print(f"[Jurema] Retry em {delay:.1f}s (tentativa {attempt + 1}/{JUREMA_MAX_RETRIES})")
+                print(
+                    f"[Jurema] Retry em {delay:.1f}s (tentativa {attempt + 1}/{JUREMA_MAX_RETRIES})"
+                )
                 await asyncio.sleep(delay)
 
         # All retries exhausted — try direct inference as last resort
         try:
-            result = await self._direct_inference(HF_JUREMA_MODEL, system, user, max_tokens)
+            result = await self._direct_inference(
+                HF_JUREMA_MODEL, system, user, max_tokens
+            )
             if result and not result.startswith("["):
                 self._stats["jurema_successes"] += 1
                 self._jurema_mark_success()
@@ -206,7 +228,9 @@ class HuggingFaceClient:
             return response.choices[0].message.content or ""
         except Exception as e:
             print(f"[LongCat] Erro na API OpenAI compat: {e}. Tentando fallback...")
-            return await self._direct_inference(HF_LONGCAT_MODEL, system, user, max_tokens)
+            return await self._direct_inference(
+                HF_LONGCAT_MODEL, system, user, max_tokens
+            )
 
     async def _direct_inference(
         self, model: str, system: str, user: str, max_tokens: int
@@ -254,7 +278,11 @@ class LLMClient:
             self.provider = os.getenv("LLM_PROVIDER", "maritaca")
 
         if self.provider == "ollama":
-            self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434/v1").rstrip("/v1").rstrip("/")
+            self.ollama_url = (
+                os.getenv("OLLAMA_BASE_URL", "http://ollama:11434/v1")
+                .rstrip("/v1")
+                .rstrip("/")
+            )
             self.model = os.getenv("OLLAMA_MODEL", "llama3.2")
             self.client = None
         elif self.provider == "claude_cli":
@@ -262,6 +290,7 @@ class LLMClient:
             self.client = None
         elif self.provider == "anthropic":
             import anthropic as _anthropic
+
             self.anthropic_client = _anthropic.AsyncAnthropic(
                 api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             )
@@ -280,9 +309,15 @@ class LLMClient:
         self.hf_client = HuggingFaceClient(hf_key) if hf_key else None
 
         # Local Ollama Jurema (priority over HF when enabled)
-        self.ollama_jurema_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434").rstrip("/v1").rstrip("/")
+        self.ollama_jurema_url = (
+            os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+            .rstrip("/v1")
+            .rstrip("/")
+        )
         self.ollama_jurema_model = os.getenv("JUREMA_OLLAMA_MODEL", "jurema")
-        self.ollama_jurema_enabled = os.getenv("JUREMA_PROVIDER", "").lower() == "ollama"
+        self.ollama_jurema_enabled = (
+            os.getenv("JUREMA_PROVIDER", "").lower() == "ollama"
+        )
 
     @property
     def jurema_available(self) -> bool:
@@ -310,7 +345,9 @@ class LLMClient:
         }
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
-                r = await client.post(f"{self.ollama_jurema_url}/api/chat", json=payload)
+                r = await client.post(
+                    f"{self.ollama_jurema_url}/api/chat", json=payload
+                )
                 r.raise_for_status()
                 msg = r.json().get("message", {})
                 return msg.get("content") or None
@@ -326,9 +363,13 @@ class LLMClient:
     ) -> str | None:
         """Unified Jurema call — routes to Ollama or HuggingFace based on JUREMA_PROVIDER."""
         if self.ollama_jurema_enabled:
-            return await self._chat_jurema_ollama(system=system, user=user, max_tokens=max_tokens)
+            return await self._chat_jurema_ollama(
+                system=system, user=user, max_tokens=max_tokens
+            )
         if self.hf_client and self.hf_client._jurema_is_available():
-            return await self.hf_client.chat_jurema(system=system, user=user, max_tokens=max_tokens)
+            return await self.hf_client.chat_jurema(
+                system=system, user=user, max_tokens=max_tokens
+            )
         return None
 
     async def chat_with_jurema(
@@ -346,7 +387,9 @@ class LLMClient:
         Returns {"claude": str, "jurema": str | None}.
         Jurema failure never blocks or degrades Claude's result.
         """
-        claude_task = self.chat(system=system, user=user, max_tokens=max_tokens, json_mode=json_mode)
+        claude_task = self.chat(
+            system=system, user=user, max_tokens=max_tokens, json_mode=json_mode
+        )
 
         if self.ollama_jurema_enabled:
             # Local Ollama has priority over HuggingFace
@@ -356,7 +399,9 @@ class LLMClient:
                 max_tokens=jurema_max_tokens,
             )
             claude_result, jurema_result = await asyncio.gather(
-                claude_task, jurema_task, return_exceptions=True,
+                claude_task,
+                jurema_task,
+                return_exceptions=True,
             )
         elif self.hf_client and self.hf_client._jurema_is_available():
             jurema_task = self.hf_client.chat_jurema(
@@ -365,7 +410,9 @@ class LLMClient:
                 max_tokens=jurema_max_tokens,
             )
             claude_result, jurema_result = await asyncio.gather(
-                claude_task, jurema_task, return_exceptions=True,
+                claude_task,
+                jurema_task,
+                return_exceptions=True,
             )
         else:
             claude_result = await claude_task
@@ -374,7 +421,9 @@ class LLMClient:
         # Claude must always return
         if isinstance(claude_result, Exception):
             raise claude_result
-        claude_text = claude_result if isinstance(claude_result, str) else str(claude_result)
+        claude_text = (
+            claude_result if isinstance(claude_result, str) else str(claude_result)
+        )
 
         # Jurema is optional — validate output
         jurema_text = None
@@ -438,13 +487,17 @@ class LLMClient:
             return {
                 "provider": "anthropic",
                 "available": bool(os.getenv("ANTHROPIC_API_KEY")),
-                "message": "Anthropic configurado" if os.getenv("ANTHROPIC_API_KEY") else "ANTHROPIC_API_KEY ausente",
+                "message": "Anthropic configurado"
+                if os.getenv("ANTHROPIC_API_KEY")
+                else "ANTHROPIC_API_KEY ausente",
             }
 
         return {
             "provider": "maritaca",
             "available": bool(os.getenv("MARITACA_API_KEY")),
-            "message": "Maritaca configurado" if os.getenv("MARITACA_API_KEY") else "MARITACA_API_KEY ausente",
+            "message": "Maritaca configurado"
+            if os.getenv("MARITACA_API_KEY")
+            else "MARITACA_API_KEY ausente",
         }
 
     async def chat(
@@ -458,9 +511,41 @@ class LLMClient:
         if self.provider == "ollama":
             return await self._chat_ollama(system, user, temperature, max_tokens)
         elif self.provider == "claude_cli":
-            return await self._chat_claude_cli(system, user, json_mode)
+            try:
+                return await self._chat_claude_cli(system, user, json_mode)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "limit" in error_str or "resets" in error_str:
+                    # Claude CLI hit usage limit — fall back to Maritaca if available
+                    if os.getenv("MARITACA_API_KEY"):
+                        print(
+                            f"[Claude CLI] Uso limitado. Fazendo fallback para sabia-4 (Maritaca)..."
+                        )
+                        return await self._chat_openai(
+                            system, user, temperature, max_tokens
+                        )
+                    elif os.getenv("ANTHROPIC_API_KEY"):
+                        print(
+                            f"[Claude CLI] Uso limitado. Fazendo fallback para Anthropic API..."
+                        )
+                        return await self._chat_anthropic(
+                            system, user, temperature, max_tokens
+                        )
+                raise
         elif self.provider == "anthropic":
-            return await self._chat_anthropic(system, user, temperature, max_tokens)
+            try:
+                return await self._chat_anthropic(system, user, temperature, max_tokens)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "limit" in error_str or "resets" in error_str:
+                    if os.getenv("MARITACA_API_KEY"):
+                        print(
+                            f"[Anthropic API] Uso limitado. Fazendo fallback para sabia-4 (Maritaca)..."
+                        )
+                        return await self._chat_openai(
+                            system, user, temperature, max_tokens
+                        )
+                raise
         else:
             return await self._chat_openai(system, user, temperature, max_tokens)
 
@@ -514,10 +599,20 @@ Responda APENAS com as citações formatadas, sem meta-comentários."""
                 max_tokens=2000,
             )
             claude_result, jurema_result = await asyncio.gather(
-                claude_task, jurema_task, return_exceptions=True,
+                claude_task,
+                jurema_task,
+                return_exceptions=True,
             )
-            results["claude"] = claude_result if isinstance(claude_result, str) else f"[Erro Claude: {claude_result}]"
-            results["jurema"] = jurema_result if isinstance(jurema_result, str) and is_valid_legal_pt(jurema_result) else None
+            results["claude"] = (
+                claude_result
+                if isinstance(claude_result, str)
+                else f"[Erro Claude: {claude_result}]"
+            )
+            results["jurema"] = (
+                jurema_result
+                if isinstance(jurema_result, str) and is_valid_legal_pt(jurema_result)
+                else None
+            )
         elif self.hf_client:
             jurema_task = self.hf_client.chat_jurema(
                 system=jurema_prompt,
@@ -542,16 +637,34 @@ Be concise. Respond in Portuguese."""
             )
 
             claude_result, jurema_result, longcat_result = await asyncio.gather(
-                claude_task, jurema_task, longcat_task,
+                claude_task,
+                jurema_task,
+                longcat_task,
                 return_exceptions=True,
             )
 
-            results["claude"] = claude_result if isinstance(claude_result, str) else f"[Erro Claude: {claude_result}]"
-            results["jurema"] = jurema_result if isinstance(jurema_result, str) and is_valid_legal_pt(jurema_result) else None
-            results["longcat"] = longcat_result if isinstance(longcat_result, str) and is_valid_legal_pt(longcat_result) else None
+            results["claude"] = (
+                claude_result
+                if isinstance(claude_result, str)
+                else f"[Erro Claude: {claude_result}]"
+            )
+            results["jurema"] = (
+                jurema_result
+                if isinstance(jurema_result, str) and is_valid_legal_pt(jurema_result)
+                else None
+            )
+            results["longcat"] = (
+                longcat_result
+                if isinstance(longcat_result, str) and is_valid_legal_pt(longcat_result)
+                else None
+            )
         else:
             claude_result = await claude_task
-            results["claude"] = claude_result if isinstance(claude_result, str) else f"[Erro: {claude_result}]"
+            results["claude"] = (
+                claude_result
+                if isinstance(claude_result, str)
+                else f"[Erro: {claude_result}]"
+            )
 
         return results
 
@@ -564,7 +677,9 @@ Be concise. Respond in Portuguese."""
     ) -> AsyncIterator[str]:
         """Gera texto em streaming — yield de chunks de texto conforme chegam."""
         if self.provider == "ollama":
-            async for chunk in self._stream_ollama(system, user, temperature, max_tokens):
+            async for chunk in self._stream_ollama(
+                system, user, temperature, max_tokens
+            ):
                 yield chunk
         elif self.provider == "claude_cli":
             # Claude CLI doesn't natively stream in a way we can intercept easily to yield here,
@@ -572,28 +687,42 @@ Be concise. Respond in Portuguese."""
             res = await self._chat_claude_cli(system, user)
             yield res
         else:
-            async for chunk in self._stream_openai(system, user, temperature, max_tokens):
+            async for chunk in self._stream_openai(
+                system, user, temperature, max_tokens
+            ):
                 yield chunk
 
     # ── Claude CLI ────────────────────────────────────────────────────────────
 
-    async def _chat_claude_cli(self, system: str, user: str, json_mode: bool = False) -> str:
+    async def _chat_claude_cli(
+        self, system: str, user: str, json_mode: bool = False
+    ) -> str:
         prompt = f"System: {system}\n\nUser: {user}"
 
         loop = asyncio.get_running_loop()
+
         def _run():
             try:
                 # Resolve claude executable: shutil.which checks PATH correctly on
                 # both Windows (finds claude.cmd / claude.exe in %APPDATA%\npm)
                 # and Linux (finds /usr/local/bin/claude after npm -g install).
                 import shutil
+
                 claude_exe = shutil.which("claude") or shutil.which("claude.cmd")
                 if not claude_exe:
                     # Last-resort hardcoded candidates
                     for c in [
                         "/usr/local/bin/claude",
-                        os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm", "claude.cmd"),
-                        os.path.join(os.path.expanduser("~"), ".local", "bin", "claude"),
+                        os.path.join(
+                            os.path.expanduser("~"),
+                            "AppData",
+                            "Roaming",
+                            "npm",
+                            "claude.cmd",
+                        ),
+                        os.path.join(
+                            os.path.expanduser("~"), ".local", "bin", "claude"
+                        ),
                     ]:
                         if os.path.exists(c):
                             claude_exe = c
@@ -616,7 +745,9 @@ Be concise. Respond in Portuguese."""
                 env["CI"] = "1"
                 # Claude Code on Windows needs git-bash path
                 if "CLAUDE_CODE_GIT_BASH_PATH" not in env:
-                    git_bash_path = r"C:\Users\paollo\AppData\Local\Programs\Git\bin\bash.exe"
+                    git_bash_path = (
+                        r"C:\Users\paollo\AppData\Local\Programs\Git\bin\bash.exe"
+                    )
                     if os.path.exists(git_bash_path):
                         env["CLAUDE_CODE_GIT_BASH_PATH"] = git_bash_path
 
@@ -627,30 +758,51 @@ Be concise. Respond in Portuguese."""
                     input=prompt,
                     capture_output=True,
                     text=True,
-                    encoding='utf-8',
+                    encoding="utf-8",
                     timeout=180,
                     env=env,
                 )
                 if result.returncode != 0:
                     error_output = (result.stderr or result.stdout or "").strip()
                     lower_error = error_output.lower()
-                    if "login" in lower_error or "authenticated" in lower_error or "authentication" in lower_error:
-                        raise Exception("Claude CLI não está autenticado. Execute 'claude login' e tente novamente.")
-                    if "limit" in lower_error or "quota" in lower_error or "resets" in lower_error:
-                        raise Exception(f"Claude CLI atingiu o limite da conta. {error_output}")
+                    if (
+                        "login" in lower_error
+                        or "authenticated" in lower_error
+                        or "authentication" in lower_error
+                    ):
+                        raise Exception(
+                            "Claude CLI não está autenticado. Execute 'claude login' e tente novamente."
+                        )
+                    if (
+                        "limit" in lower_error
+                        or "quota" in lower_error
+                        or "resets" in lower_error
+                    ):
+                        raise Exception(
+                            f"Claude CLI atingiu o limite da conta. {error_output}"
+                        )
                     # EOF errors are transient — signal for retry
-                    if "eof" in lower_error or "error reading from server" in lower_error:
+                    if (
+                        "eof" in lower_error
+                        or "error reading from server" in lower_error
+                    ):
                         raise _EOFRetryError(f"Claude CLI EOF: {error_output}")
-                    raise Exception(f"Claude CLI Error: {error_output or 'erro desconhecido'}")
+                    raise Exception(
+                        f"Claude CLI Error: {error_output or 'erro desconhecido'}"
+                    )
 
                 output = result.stdout.strip()
                 if not output:
-                    raise Exception("Claude CLI retornou resposta vazia. Verifique se o login foi concluído com sucesso.")
+                    raise Exception(
+                        "Claude CLI retornou resposta vazia. Verifique se o login foi concluído com sucesso."
+                    )
                 return output
             except _EOFRetryError:
                 raise
             except FileNotFoundError:
-                raise Exception("Claude CLI not found. Is it installed via npm and in your PATH?")
+                raise Exception(
+                    "Claude CLI not found. Is it installed via npm and in your PATH?"
+                )
 
         max_retries = 3
         for attempt in range(max_retries):
@@ -658,8 +810,10 @@ Be concise. Respond in Portuguese."""
                 return await loop.run_in_executor(None, _run)
             except _EOFRetryError as e:
                 if attempt < max_retries - 1:
-                    delay = 2 ** attempt  # 1s, 2s, 4s
-                    print(f"[Claude CLI] EOF transient error (tentativa {attempt + 1}/{max_retries}), retry em {delay}s: {e}")
+                    delay = 2**attempt  # 1s, 2s, 4s
+                    print(
+                        f"[Claude CLI] EOF transient error (tentativa {attempt + 1}/{max_retries}), retry em {delay}s: {e}"
+                    )
                     await asyncio.sleep(delay)
                 else:
                     raise Exception(str(e))
@@ -682,7 +836,9 @@ Be concise. Respond in Portuguese."""
             msg = r.json()["message"]
             return msg.get("content") or msg.get("thinking", "")
 
-    async def _stream_ollama(self, system, user, temperature, max_tokens) -> AsyncIterator[str]:
+    async def _stream_ollama(
+        self, system, user, temperature, max_tokens
+    ) -> AsyncIterator[str]:
         payload = {
             "model": self.model,
             "messages": [
@@ -695,7 +851,9 @@ Be concise. Respond in Portuguese."""
         # glm-5:cloud é modelo de raciocínio: thinking tokens chegam primeiro,
         # conteúdo real só aparece depois. Ignoramos chunks de thinking.
         async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream("POST", f"{self.ollama_url}/api/chat", json=payload) as r:
+            async with client.stream(
+                "POST", f"{self.ollama_url}/api/chat", json=payload
+            ) as r:
                 r.raise_for_status()
                 async for line in r.aiter_lines():
                     if not line:
@@ -738,7 +896,9 @@ Be concise. Respond in Portuguese."""
         )
         return response.choices[0].message.content
 
-    async def _stream_openai(self, system, user, temperature, max_tokens) -> AsyncIterator[str]:
+    async def _stream_openai(
+        self, system, user, temperature, max_tokens
+    ) -> AsyncIterator[str]:
         stream = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -754,7 +914,6 @@ Be concise. Respond in Portuguese."""
             if delta:
                 yield delta
 
-
     # ── Tool calling (sabia-4 pesquisa jurisprudência ativamente) ────────────
 
     async def chat_with_tools(
@@ -762,7 +921,7 @@ Be concise. Respond in Portuguese."""
         system: str,
         user: str,
         tools: list[dict],
-        tool_executor,          # async callable(name, args) -> str
+        tool_executor,  # async callable(name, args) -> str
         temperature: float = 0.3,
         max_tokens: int = 3000,
         max_tool_rounds: int = 3,
@@ -780,17 +939,29 @@ Be concise. Respond in Portuguese."""
                 fn = tool.get("function", {})
                 # Usa parâmetros padrão do schema (required fields com descrição)
                 props = fn.get("parameters", {}).get("properties", {})
-                default_args = {k: v.get("description", k) for k, v in props.items()
-                                if k in fn.get("parameters", {}).get("required", [])}
+                default_args = {
+                    k: v.get("description", k)
+                    for k, v in props.items()
+                    if k in fn.get("parameters", {}).get("required", [])
+                }
                 try:
                     result = await tool_executor(fn.get("name", ""), default_args)
-                    tool_results.append(f"[{fn.get('name','')}]: {result[:600]}")
+                    tool_results.append(f"[{fn.get('name', '')}]: {result[:600]}")
                 except Exception:
                     pass
             enriched_user = user
             if tool_results:
-                enriched_user = user + "\n\n=== FONTES PESQUISADAS ===\n" + "\n\n".join(tool_results)
-            return await self.chat(system=system, user=enriched_user, temperature=temperature, max_tokens=max_tokens)
+                enriched_user = (
+                    user
+                    + "\n\n=== FONTES PESQUISADAS ===\n"
+                    + "\n\n".join(tool_results)
+                )
+            return await self.chat(
+                system=system,
+                user=enriched_user,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
 
         # OpenAI-compatible tool calling loop
         messages = [
@@ -843,11 +1014,13 @@ Be concise. Respond in Portuguese."""
                 except Exception as e:
                     result_text = f"Erro ao executar {fn_name}: {e}"
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result_text,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result_text,
+                    }
+                )
 
         # Final generation after all tool rounds
         response = await self.client.chat.completions.create(
@@ -927,6 +1100,7 @@ Be concise. Respond in Portuguese."""
                     format_section_sources,
                     _pick_tribunais,
                 )
+
                 if name == "buscar_jurisprudencia":
                     tema = args.get("tema", section_title)
                     tribunais = args.get("tribunais") or _pick_tribunais(doc_type)
@@ -936,15 +1110,30 @@ Be concise. Respond in Portuguese."""
                         return_exceptions=True,
                     )
                     results = []
-                    if isinstance(datajud, list): results.extend(datajud)
-                    if isinstance(ddg, list): results.extend(ddg)
-                    return format_section_sources({"jurisprudencia": results[:5], "doutrina": [], "all_sources": results[:5]})
+                    if isinstance(datajud, list):
+                        results.extend(datajud)
+                    if isinstance(ddg, list):
+                        results.extend(ddg)
+                    return format_section_sources(
+                        {
+                            "jurisprudencia": results[:5],
+                            "doutrina": [],
+                            "all_sources": results[:5],
+                        }
+                    )
 
                 elif name == "buscar_doutrina":
                     tema = args.get("tema", section_title)
                     doutrina = await search_doutrina_targeted(tema, max_results=3)
-                    if isinstance(doutrina, Exception): doutrina = []
-                    return format_section_sources({"jurisprudencia": [], "doutrina": doutrina, "all_sources": doutrina})
+                    if isinstance(doutrina, Exception):
+                        doutrina = []
+                    return format_section_sources(
+                        {
+                            "jurisprudencia": [],
+                            "doutrina": doutrina,
+                            "all_sources": doutrina,
+                        }
+                    )
 
             except Exception as e:
                 return f"Busca indisponível: {e}"
@@ -961,6 +1150,7 @@ Be concise. Respond in Portuguese."""
 
 
 # ── Instâncias globais ────────────────────────────────────────────────────────
+
 
 def _make_sabia_client() -> "LLMClient":
     """sabia-4 (Maritaca) — redige seções com pesquisa ativa de jurisprudência."""
