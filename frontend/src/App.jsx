@@ -205,6 +205,7 @@ function RefinementBar() {
       {canSubmit && (
         <div style={{ display: "flex", justifyContent: "flex-end", maxWidth: 820, margin: "0 auto 4px" }}>
           <button
+            onClick={() => { setSelected(null); setCustomText(""); }}
             style={{
               padding: "7px 18px", borderRadius: 8, border: "none",
               background: "var(--accent)", color: "#fff", fontWeight: 700,
@@ -1175,9 +1176,13 @@ export default function JurisGenApp() {
 
   const handleGenerate = async () => {
     setStage("generating");
-    setSections([]);
-    setResearchLog([]);
-    setCurrentSection(-1);
+    setError(""); // clear previous errors
+    // Only clear sections if this is a fresh generation (not retry after error)
+    if (sections.length === 0 || sections.every(s => s.is_sources)) {
+      setSections([]);
+      setResearchLog([]);
+      setCurrentSection(-1);
+    }
     setStartTime(Date.now());
 
     try {
@@ -1191,7 +1196,8 @@ export default function JurisGenApp() {
       const reader = r.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let sectionCount = 0;
+      let sectionCount = sections.filter(s => !s.is_sources).length;
+      let hadError = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1214,6 +1220,7 @@ export default function JurisGenApp() {
                 return next;
               });
             } else if (ev.type === "error") {
+              hadError = true;
               throw new Error(ev.message || "Erro na geração do documento");
             }
           } catch (parseErr) {
@@ -1226,8 +1233,9 @@ export default function JurisGenApp() {
       setStage("document");
       setStartTime(null);
     } catch (e) {
-      setError(e.message);
-      setStage("outline");
+      const errMsg = e.message;
+      setError(errMsg);
+      setStage("document"); // Show document with partial content + error
       setStartTime(null);
     }
   };
@@ -1534,6 +1542,11 @@ export default function JurisGenApp() {
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "24px 48px", maxWidth: 800, margin: "0 auto", width: "100%" }}>
+          {error && (
+            <div style={{ padding: "12px 16px", marginBottom: 16, borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontSize: 13 }}>
+              ⚠️ {error}
+            </div>
+          )}
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 4 }}>{outline?.title || docType}</h2>
           <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
             <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{secs.length} etapas</span>
@@ -1610,6 +1623,13 @@ export default function JurisGenApp() {
       {stage === "document" && (
         <div style={{ padding: "6px 20px", background: "rgba(34,197,94,0.05)", borderBottom: "1px solid rgba(34,197,94,0.1)", fontSize: 12, color: "#22c55e", textAlign: "center" }}>
           ● Este documento é editável. A IA entende e preserva as suas edições! Clique no texto para começar.
+        </div>
+      )}
+
+      {/* Error banner — shown when generation had issues */}
+      {error && stage === "document" && (
+        <div style={{ padding: "10px 20px", background: "rgba(239,68,68,0.08)", borderBottom: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#ef4444", textAlign: "center" }}>
+          ⚠️ {error} — Documento pode estar incompleto.
         </div>
       )}
 
