@@ -3,24 +3,36 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # System deps + Node.js LTS (for Claude CLI)
+# curl: health check + nodesource install script
+# gcc: some Python packages need it at build time
+# git: required by Claude CLI internals
+# ca-certificates: HTTPS to Anthropic / HuggingFace endpoints
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gcc git ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Claude CLI globally
+# Install Claude CLI globally via npm (no API key required — uses OAuth credentials)
 RUN npm install -g @anthropic-ai/claude-code
+
+# Pre-create the Claude credentials directory so start.sh can write to it
+RUN mkdir -p /root/.claude
 
 COPY requirements_minimal.txt .
 RUN pip install --no-cache-dir -r requirements_minimal.txt
 
+# Copy all backend source files (includes start.sh, check_claude_env.py, export_claude_credentials.sh)
 COPY . .
 
-RUN chmod +x start.sh
+RUN chmod +x start.sh export_claude_credentials.sh
 
 EXPOSE 8000
 
-# start.sh restores Claude CLI credentials from CLAUDE_CREDENTIALS_B64 then
-# launches uvicorn.
+# Health check — verifies uvicorn is responding before Render marks the service healthy
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+
+# start.sh: restores OAuth credentials from CLAUDE_CREDENTIALS_B64, runs quick
+# env diagnostic, then launches uvicorn. No ANTHROPIC_API_KEY needed.
 CMD ["bash", "start.sh"]

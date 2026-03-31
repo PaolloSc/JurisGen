@@ -271,11 +271,17 @@ class LLMClient:
     def __init__(self, force_provider: str | None = None):
         # force_provider overrides all env vars (for dual-client setup)
         if force_provider:
-            self.provider = force_provider
+            raw = force_provider
         elif os.getenv("CLAUDE_AUTH_MODE") == "cli":
-            self.provider = "claude_cli"
+            # CLAUDE_AUTH_MODE=cli always selects the Claude CLI provider,
+            # regardless of what LLM_PROVIDER says.
+            raw = "claude_cli"
         else:
-            self.provider = os.getenv("LLM_PROVIDER", "maritaca")
+            raw = os.getenv("LLM_PROVIDER", "maritaca")
+
+        # Normalise: accept "cli" as an alias for "claude_cli" so that both
+        # LLM_PROVIDER=cli (legacy .env.example) and LLM_PROVIDER=claude_cli work.
+        self.provider = "claude_cli" if raw == "cli" else raw
 
         if self.provider == "ollama":
             self.ollama_url = (
@@ -539,8 +545,11 @@ class LLMClient:
                         )
                 raise
         elif self.provider == "anthropic":
-            # anthropic provider is redirected to Claude CLI
-            return await self._chat_claude_cli(system, user, json_mode)
+            # Use the Anthropic SDK directly (requires ANTHROPIC_API_KEY).
+            # This provider is intentionally separate from claude_cli so that
+            # operators can choose between OAuth-based CLI auth (claude_cli) and
+            # direct SDK key auth (anthropic).
+            return await self._chat_anthropic(system, user, 0.3, max_tokens)
         else:
             return await self._chat_openai(system, user, temperature, max_tokens)
 
@@ -759,9 +768,15 @@ Be concise. Respond in Portuguese."""
                             env["HOME"] = base  # align HOME with the credentials location
                             break
 
-                # ── API-key auth (for Render / CI environments) ──
-                # If ANTHROPIC_API_KEY is available and not already forwarded,
-                # pass it so Claude CLI authenticates via key (no `claude login` needed).
+                # ── OAuth credentials (preferred — no API key needed) ──────────────
+                # CLAUDE_CREDENTIALS_B64 is decoded by start.sh at container boot
+                # into /root/.claude/.credentials.json so the CLI authenticates via
+                # the stored OAuth session.  This is the primary auth path.
+                #
+                # ── ANTHROPIC_API_KEY (optional environment override) ──────────────
+                # If the operator sets ANTHROPIC_API_KEY in the Render dashboard the
+                # CLI will use it as a convenience.  It is NEVER required — the system
+                # works solely on OAuth credentials (CLAUDE_CREDENTIALS_B64).
                 if os.getenv("ANTHROPIC_API_KEY") and "ANTHROPIC_API_KEY" not in env:
                     env["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY", "")
 
@@ -1191,18 +1206,13 @@ Be concise. Respond in Portuguese."""
 
 
 def _make_sabia_client() -> "LLMClient":
-    """Escolhe provider para geração de seções.
-
-    Prioridade:
-    1. Claude CLI (sempre preferido — usa ANTHROPIC_API_KEY ou OAuth)
-    2. MARITACA_API_KEY → sabia-4 como fallback de último recurso
-    """
-    return LLMClient(force_provider="claude_cli")
+    """Escolhe provider para geração de seções via CLAUDE_AUTH_MODE / LLM_PROVIDER."""
+    return LLMClient()
 
 
 def _make_orchestrator() -> "LLMClient":
-    """Claude CLI — orquestra perguntas, classifica tipo de peça e gera outline."""
-    return LLMClient(force_provider="claude_cli")
+    """Orquestra perguntas, classifica tipo de peça e gera outline."""
+    return LLMClient()
 
 
 # Mantém compatibilidade com código existente
