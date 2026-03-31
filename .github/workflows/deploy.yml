@@ -34,8 +34,13 @@ jobs:
 
       - name: Trigger Render Deploy
         run: |
-          curl -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL not configured — skipping (Render autoDeploy handles it)"
+            exit 0
+          fi
+          curl -s -X POST "$RENDER_DEPLOY_HOOK_URL"
         env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
           CURL_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
 
 # NOTE: Para ativar este passo:
