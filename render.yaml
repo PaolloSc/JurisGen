@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: jurisgen-backend
+    name: jurisgen
     runtime: docker
     # Dockerfile.railway usa start.sh que restaura credenciais do Claude CLI
     # a partir de CLAUDE_CREDENTIALS_B64 antes de subir o uvicorn.
