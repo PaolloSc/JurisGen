@@ -14,7 +14,8 @@ set -e
 if [ -n "$CLAUDE_CREDENTIALS_B64" ]; then
     CLAUDE_DIR="${HOME}/.claude"
     mkdir -p "$CLAUDE_DIR"
-    echo "$CLAUDE_CREDENTIALS_B64" | base64 -d > "$CLAUDE_DIR/.credentials.json"
+    # Remover espaços, quebras de linha e caracteres inválidos antes de decodificar
+    printf '%s' "$CLAUDE_CREDENTIALS_B64" | tr -d '[:space:]' | base64 -d > "$CLAUDE_DIR/.credentials.json"
     chmod 600 "$CLAUDE_DIR/.credentials.json"
     echo "[startup] Claude CLI credentials restored to $CLAUDE_DIR/.credentials.json"
 else
