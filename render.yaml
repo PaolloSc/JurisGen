@@ -2,13 +2,44 @@ services:
   - type: web
     name: jurisgen-backend
     runtime: docker
-    dockerfilePath: backend/Dockerfile
+    # Dockerfile.railway usa start.sh que restaura credenciais do Claude CLI
+    # a partir de CLAUDE_CREDENTIALS_B64 antes de subir o uvicorn.
+    dockerfilePath: backend/Dockerfile.railway
+    autoDeploy: true
     envVars:
-      - key: LLM_PROVIDER
-        value: anthropic
-      - key: ANTHROPIC_API_KEY
+      # ─── Claude CLI — autenticação via OAuth (sem API key) ────────────────
+      # Obtenha o valor executando localmente:
+      #   base64 -w0 ~/.claude/.credentials.json
+      # Cole o resultado em CLAUDE_CREDENTIALS_B64 no dashboard do Render.
+      - key: CLAUDE_CREDENTIALS_B64
         sync: false
+
+      # Modo de autenticação: "cli" faz o backend usar subprocess do claude
+      - key: CLAUDE_AUTH_MODE
+        value: cli
+
+      # Provider primário: Claude CLI (sem API key Anthropic)
+      - key: LLM_PROVIDER
+        value: claude_cli
+
+      # ─── Maritaca sabia-4 — fallback quando Claude CLI está indisponível ──
+      # Opcional: configure no dashboard do Render somente se quiser fallback.
+      - key: MARITACA_API_KEY
+        sync: false
+      - key: MARITACA_BASE_URL
+        value: https://chat.maritaca.ai/api
+      - key: MARITACA_MODEL
+        value: sabia-4
+
+      # ─── HuggingFace (Jurema 7B + LongCat) — enriquecimento jurídico ──────
+      # Opcional: habilita o modelo Jurema 7B para jurisprudência.
       - key: JUREMA_PROVIDER
         value: hf
       - key: HF_API_KEY
         sync: false
+
+      # ─── App Configuration ────────────────────────────────────────────────
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: PORT
+        value: 8000
