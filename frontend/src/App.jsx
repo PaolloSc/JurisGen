@@ -338,9 +338,12 @@ function QuestionForm({ questions, onSubmit }) {
   const answered = Object.keys(answers).filter(k => { const v = answers[k]; return v && (typeof v === "string" ? v.trim() : true); }).length;
   const required = safeQ.filter(q => q.required !== false).length;
 
+  const isOtherLabel = (s) => /^outr[oa]s?$/i.test(String(s).trim()) || /^other$/i.test(String(s).trim());
   const norm = (o) => {
-    if (typeof o === "string") return { id: o, label: o };
-    return { id: o.id ?? o.label ?? "o", label: o.label ?? o.text ?? "Opção", desc: o.desc || "" };
+    if (typeof o === "string") return { id: isOtherLabel(o) ? "other" : o, label: o };
+    const raw = o.id ?? o.label ?? "o";
+    const id = isOtherLabel(raw) || isOtherLabel(o.label) ? "other" : raw;
+    return { id, label: o.label ?? o.text ?? "Opção", desc: o.desc || "" };
   };
 
   return (
@@ -382,7 +385,7 @@ function QuestionForm({ questions, onSubmit }) {
                     // For multiple: answers[q.id] is an array; ensure it's always treated as array
                     const curArr = isMulti ? (Array.isArray(answers[q.id]) ? answers[q.id] : []) : null;
                     const sel = isMulti
-                      ? curArr.includes(o.label)
+                      ? (o.id === "other" ? !!otherMode[q.id] : curArr.includes(o.label))
                       : o.id === "other" ? !!otherMode[q.id] : answers[q.id] === o.label;
                     return (
                       <button key={o.id} onClick={() => {
