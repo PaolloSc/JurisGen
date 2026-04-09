@@ -841,6 +841,31 @@ function BibliotecaPanel() {
   const [search, setSearch] = useState("");
   const [folder, setFolder] = useState("all");
   const [sortBy, setSortBy] = useState("name");
+  const pollRef = useRef(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const startPolling = () => {
+    stopPolling();
+    setSyncing(true);
+    pollRef.current = setInterval(async () => {
+      try {
+        const r = await api("/api/sharepoint/sync-status");
+        const d = await r.json();
+        setSyncStatus(d);
+        if (!d.running) {
+          stopPolling();
+          setSyncing(false);
+          // Reload file list after sync completes
+          const libResp = await api("/api/sharepoint/biblioteca");
+          const libData = await libResp.json();
+          setFiles(libData.files || []);
+        }
+      } catch { stopPolling(); setSyncing(false); }
+    }, 2000);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -853,26 +878,22 @@ function BibliotecaPanel() {
       const statusData = await statusResp.json();
       setFiles(libData.files || []);
       setSyncStatus({ ...libData, ...statusData });
+      // Resume polling if sync is already running on the backend
+      if (statusData.running && !pollRef.current) startPolling();
     } catch (e) { setFiles([]); } finally { setLoading(false); }
   };
 
   const triggerSync = async (force = false) => {
-    setSyncing(true);
     try {
       await api("/api/sharepoint/sync", { method: "POST", body: JSON.stringify({ force }) });
-      // Poll until done
-      const poll = setInterval(async () => {
-        try {
-          const r = await api("/api/sharepoint/sync-status");
-          const d = await r.json();
-          setSyncStatus(d);
-          if (!d.running) { clearInterval(poll); setSyncing(false); load(); }
-        } catch { clearInterval(poll); setSyncing(false); }
-      }, 2000);
+      startPolling();
     } catch { setSyncing(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    return () => stopPolling(); // clear interval when leaving the tab
+  }, []);
 
   const folders = ["all", ...new Set(files.map(f => f.folder || "").filter(Boolean))];
   const filtered = files.filter(f => {
