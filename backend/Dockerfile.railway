@@ -27,6 +27,11 @@ COPY . .
 
 RUN chmod +x start.sh export_claude_credentials.sh
 
+# Docling artifacts dir — prevents random cache scatter; no ML models downloaded here
+# (SimplePipeline only uses docling-parse, a native binary — no HuggingFace downloads)
+ENV DOCLING_ARTIFACTS_PATH=/app/.docling_artifacts
+RUN mkdir -p /app/.docling_artifacts
+
 EXPOSE 8000
 
 # Health check — verifies uvicorn is responding before Render marks the service healthy

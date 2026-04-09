@@ -1,8 +1,16 @@
 """
 SharePoint Auto-Sync
 ====================
-Downloads all files from a SharePoint document library, saves them to disk,
-and indexes them in ChromaDB via Docling for RAG.
+Two-phase strategy:
+
+  Phase 1 — MIRROR (all files):
+    Downloads metadata + saves to disk for every allowed file.
+    Fast — skips files unchanged since last sync (by lastModifiedDateTime).
+
+  Phase 2 — INDEX (relevant files only):
+    Runs Docling text extraction + ChromaDB embedding only for documents
+    considered "relevant" (score >= SHAREPOINT_RELEVANCE_THRESHOLD).
+    Relevance is determined by: folder name hints, filename keywords, file type.
 
 Configuration (env vars):
   MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET  — Azure AD credentials
@@ -11,6 +19,11 @@ Configuration (env vars):
   SHAREPOINT_FILES_DIR                          — local cache dir (default ./sharepoint_files)
   SHAREPOINT_AUTO_SYNC                          — "true" to sync on startup (default true)
   SHAREPOINT_EXTENSIONS                         — comma-separated exts (default pdf,docx,doc,txt)
+  SHAREPOINT_RELEVANCE_THRESHOLD               — 0.0–1.0 min score to index (default 0.3)
+  SHAREPOINT_RELEVANT_FOLDERS                  — comma-separated folder substrings to always index
+  SHAREPOINT_RELEVANCE_KEYWORDS                — comma-separated filename keywords to always index
+  SHAREPOINT_MAX_FILE_MB                        — max file size in MB to index (default 20)
+  SHAREPOINT_MIRROR_ONLY                        — "true" to skip indexing entirely (default false)
 """
 
 from __future__ import annotations
@@ -42,6 +55,29 @@ ALLOWED_EXTENSIONS = set(
     for e in os.getenv("SHAREPOINT_EXTENSIONS", "pdf,docx,doc,txt").split(",")
     if e.strip()
 )
+
+# ─── Relevance / selective-indexing config ────────────────────────────────────
+
+# Minimum relevance score to trigger full text extraction + ChromaDB indexing
+RELEVANCE_THRESHOLD = float(os.getenv("SHAREPOINT_RELEVANCE_THRESHOLD", "0.3"))
+
+# Optional: comma-separated folder substring overrides (always index if folder contains any)
+_RELEVANT_FOLDERS_ENV = os.getenv("SHAREPOINT_RELEVANT_FOLDERS", "")
+RELEVANT_FOLDER_OVERRIDES: set[str] = {
+    f.strip().lower() for f in _RELEVANT_FOLDERS_ENV.split(",") if f.strip()
+}
+
+# Optional: comma-separated filename keyword overrides (always index if filename contains any)
+_RELEVANCE_KW_ENV = os.getenv("SHAREPOINT_RELEVANCE_KEYWORDS", "")
+RELEVANCE_KW_OVERRIDES: set[str] = {
+    k.strip().lower() for k in _RELEVANCE_KW_ENV.split(",") if k.strip()
+}
+
+# Max file size in MB to download for indexing (mirror still saves all)
+MAX_FILE_MB = float(os.getenv("SHAREPOINT_MAX_FILE_MB", "20"))
+
+# If true, only mirror (save to disk) — skip ChromaDB indexing entirely
+MIRROR_ONLY = os.getenv("SHAREPOINT_MIRROR_ONLY", "false").lower() == "true"
 
 # ─── Sync state (in-memory, updated during/after sync) ───────────────────────
 
@@ -140,6 +176,40 @@ async def _collect_items(client: httpx.AsyncClient, headers: dict, drive_id: str
         url = data.get("@odata.nextLink")  # pagination
 
     return items
+
+
+def _should_index(item: dict, file_bytes: bytes) -> bool:
+    """
+    Decide whether a document should be fully indexed (text extracted + embedded).
+
+    Returns False to skip indexing (document is still mirrored to disk).
+    """
+    if MIRROR_ONLY:
+        return False
+
+    name_lower = item["name"].lower()
+    folder_lower = item["folder"].lower()
+
+    # Hard overrides from env vars (always index)
+    if RELEVANT_FOLDER_OVERRIDES:
+        if any(rf in folder_lower for rf in RELEVANT_FOLDER_OVERRIDES):
+            return True
+    if RELEVANCE_KW_OVERRIDES:
+        if any(kw in name_lower for kw in RELEVANCE_KW_OVERRIDES):
+            return True
+
+    # File size guard (skip very large files — slow to process)
+    size_mb = len(file_bytes) / (1024 * 1024)
+    if size_mb > MAX_FILE_MB:
+        logger.info(
+            f"[Sync] '{item['name']}' ignorado para indexação ({size_mb:.1f}MB > {MAX_FILE_MB}MB)"
+        )
+        return False
+
+    # Automatic relevance scoring
+    from vector_store import score_relevance  # type: ignore
+    score = score_relevance(item["name"], item["folder"], file_bytes)
+    return score >= RELEVANCE_THRESHOLD
 
 
 async def run_sync(force: bool = False) -> dict[str, Any]:
@@ -243,25 +313,28 @@ async def run_sync(force: bool = False) -> dict[str, Any]:
                 local_path = local_folder / name
                 local_path.write_bytes(content_bytes)
 
-                # Index with Docling → ChromaDB
-                try:
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda b=content_bytes, n=name, f=folder, u=item["web_url"]: index_document(
-                            file_bytes=b,
-                            filename=n,
-                            folder=f,
-                            web_url=u,
-                            source="sharepoint",
-                            force=force,
+                # Index with Docling → ChromaDB (only if relevant)
+                chunks = 0
+                if _should_index(item, content_bytes):
+                    try:
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda b=content_bytes, n=name, f=folder, u=item["web_url"]: index_document(
+                                file_bytes=b,
+                                filename=n,
+                                folder=f,
+                                web_url=u,
+                                source="sharepoint",
+                                force=force,
+                            )
                         )
-                    )
-                    status = result.get("status", "indexado")
-                    chunks = result.get("chunks", 0)
-                except Exception as e:
-                    logger.warning(f"[Sync] Erro ao indexar '{name}': {e}")
-                    status = f"erro indexação: {str(e)[:80]}"
-                    chunks = 0
+                        status = result.get("status", "indexado")
+                        chunks = result.get("chunks", 0)
+                    except Exception as e:
+                        logger.warning(f"[Sync] Erro ao indexar '{name}': {e}")
+                        status = f"erro indexação: {str(e)[:80]}"
+                else:
+                    status = "espelhado"  # saved to disk, not indexed
 
                 # Update manifest
                 manifest[item_id] = {
