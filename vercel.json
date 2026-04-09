@@ -1,8 +1,7 @@
 {
   "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "dist",
+  "outputDirectory": "frontend/dist",
   "installCommand": "cd frontend && npm install",
-  "framework": "vite",
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -11,6 +10,10 @@
     {
       "source": "/health",
       "destination": "https://jurisgen.onrender.com/health"
+    },
+    {
+      "source": "/((?!api|health).*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
