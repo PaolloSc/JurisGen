@@ -18,9 +18,14 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install frontend dependencies
+        run: cd frontend && npm install --include=dev
+
       - name: Build Frontend
-        run: |
-          VITE_API_BASE="${{ secrets.VITE_API_BASE }}" npm run build
+        working-directory: frontend
+        run: npm run build
+        env:
+          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
 
       - name: Verify build output
         run: ls -la frontend/dist/
