@@ -23,7 +23,7 @@ jobs:
           VITE_API_BASE="${{ secrets.VITE_API_BASE }}" npm run build
 
       - name: Verify build output
-        run: ls -la dist/
+        run: ls -la frontend/dist/
 
   deploy-backend:
     needs: build-frontend
