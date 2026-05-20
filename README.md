@@ -1,6 +1,16 @@
 # JurisGen AI — Gerador Adaptativo de Documentos Jurídicos
 
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
+[![CI](https://github.com/PaolloSc/JurisGen/actions/workflows/ci.yml/badge.svg)](https://github.com/PaolloSc/JurisGen/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/Licença-Interno-red?style=flat-square)]()
+
 Sistema de geração de documentos jurídicos brasileiros com IA, interface conversacional híbrida (chat + formulários estruturados) e integração com SharePoint para referência de estilo.
+
+> **Stack:** Python · FastAPI · React · Vite · Claude API · Microsoft Graph · Docker
 
 ## Arquitetura
 
