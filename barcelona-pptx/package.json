@@ -1,0 +1,6 @@
+{
+  "name": "barcelona-pptx",
+  "version": "1.0.0",
+  "scripts": { "start": "node gerar.js" },
+  "dependencies": { "pptxgenjs": "^3.12.0" }
+}
