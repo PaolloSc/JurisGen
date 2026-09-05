@@ -29,8 +29,16 @@ from xml.sax.saxutils import escape
 import httpx
 
 # ─── Namespaces MNI ───────────────────────────────────────────
+# Confirmados no WSDL de produção do TJCE (pje1grau/intercomunicacao?wsdl).
+# O envelope da operação é `{servico}consultarProcesso`, mas os parâmetros são
+# declarados com form="qualified" no namespace `{tipos}` — mandar os filhos sem
+# prefixo faz o JAX-WS do tribunal desserializar tudo como nulo.
 NS_SERVICO_PADRAO = "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/"
+NS_TIPOS_PADRAO = "http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2"
 NS_SOAP = "http://schemas.xmlsoap.org/soap/envelope/"
+NS_WSDL = "http://schemas.xmlsoap.org/wsdl/"
+NS_WSDL_SOAP = "http://schemas.xmlsoap.org/wsdl/soap/"
+NS_XSD = "http://www.w3.org/2001/XMLSchema"
 
 DEFAULT_TIMEOUT = float(os.getenv("PJE_MNI_TIMEOUT", "120"))
 
@@ -168,6 +176,26 @@ CAMINHOS_CANDIDATOS = (
     "pje/intercomunicacao",
 )
 
+# URLs cujo WSDL respondeu em varredura de 2026-09-05 (57 tribunais testados,
+# 6 responderam). São só o ponto de partida: o endereço efetivo de chamada vem
+# do <soap:address> do próprio WSDL, que em vários tribunais aponta para outro
+# host — TJCE atende em pjews.tjce.jus.br, TJPE em pje.cloud.tjpe.jus.br,
+# TRF5 em /pjemni/. Responder ao WSDL não garante que a consulta funcione.
+ENDPOINTS_VERIFICADOS: dict[str, dict[str, str]] = {
+    "TJCE": {
+        "1": "https://pje.tjce.jus.br/pje1grau/intercomunicacao",
+        "2": "https://pje.tjce.jus.br/pje2grau/intercomunicacao",
+    },
+    "TJMT": {"*": "https://pje.tjmt.jus.br/pje/intercomunicacao"},
+    "TJPA": {"*": "https://pje.tjpa.jus.br/pje/intercomunicacao"},
+    "TJPE": {
+        "1": "https://pje.tjpe.jus.br/pje/intercomunicacao",
+        "2": "https://pje.tjpe.jus.br/pje2g/intercomunicacao",
+    },
+    "TJRR": {"*": "https://pje.tjrr.jus.br/pje/intercomunicacao"},
+    "TRF5": {"*": "https://pje.trf5.jus.br/pje/intercomunicacao"},
+}
+
 
 def _endpoints_configurados() -> dict[str, Any]:
     bruto = os.getenv("PJE_MNI_ENDPOINTS", "").strip()
@@ -183,19 +211,37 @@ def _endpoints_configurados() -> dict[str, Any]:
         ) from exc
 
 
-def candidatos_endpoint(num: NumeroCNJ, grau: str = "1") -> list[str]:
-    """Endpoints prováveis do MNI para o tribunal do processo, em ordem de tentativa."""
-    configurado = _endpoints_configurados().get(num.sigla)
-    if isinstance(configurado, str):
-        return [configurado]
-    if isinstance(configurado, dict):
-        url = configurado.get(str(grau)) or configurado.get("*")
-        if url:
-            return [url]
+def _do_mapa(mapa: dict[str, Any], sigla: str, grau: str) -> Optional[str]:
+    entrada = mapa.get(sigla)
+    if isinstance(entrada, str):
+        return entrada
+    if isinstance(entrada, dict):
+        return entrada.get(str(grau)) or entrada.get("*")
+    return None
 
-    dominio = num.sigla.lower()
-    base = f"https://pje.{dominio}.jus.br/"
-    return [base + c.format(grau=grau) for c in CAMINHOS_CANDIDATOS]
+
+def candidatos_endpoint(num: NumeroCNJ, grau: str = "1") -> list[str]:
+    """Endpoints prováveis do MNI para o tribunal do processo, em ordem de tentativa.
+
+    Precedência: PJE_MNI_ENDPOINTS (o que o usuário confirmou com o tribunal),
+    depois as URLs já verificadas, depois os caminhos genéricos.
+    """
+    configurado = _do_mapa(_endpoints_configurados(), num.sigla, grau)
+    if configurado:
+        return [configurado]
+
+    candidatos = []
+    verificado = _do_mapa(ENDPOINTS_VERIFICADOS, num.sigla, grau)
+    if verificado:
+        candidatos.append(verificado)
+
+    base = f"https://pje.{num.sigla.lower()}.jus.br/"
+    candidatos += [
+        url
+        for c in CAMINHOS_CANDIDATOS
+        if (url := base + c.format(grau=grau)) not in candidatos
+    ]
+    return candidatos
 
 
 def resolver_endpoint(numero: str, grau: str = "1") -> str:
@@ -241,6 +287,89 @@ def _attr(el: Optional[ET.Element], *nomes: str, padrao: str = "") -> str:
     return padrao
 
 
+async def _get_com_retry(
+    client: httpx.AsyncClient, url: str, tentativas: int = 2
+) -> httpx.Response:
+    """GET tolerante a reset de conexão — o PJe derruba a primeira conexão às vezes."""
+    erro: Optional[httpx.HTTPError] = None
+    for _ in range(tentativas):
+        try:
+            return await client.get(url)
+        except httpx.TransportError as exc:
+            erro = exc
+    raise erro if erro else httpx.HTTPError("falha desconhecida no GET")
+
+
+# ─── Contrato do serviço, lido do WSDL do tribunal ────────────
+@dataclass
+class ServicoMNI:
+    """O que o WSDL do tribunal diz sobre como falar com ele."""
+
+    wsdl: str
+    endpoint: str
+    ns_servico: str = NS_SERVICO_PADRAO
+    ns_tipos: str = NS_TIPOS_PADRAO
+    soap_action: str = ""
+    operacoes: list[str] = field(default_factory=list)
+
+    @classmethod
+    def presumido(cls, url: str) -> "ServicoMNI":
+        """Contrato assumido quando o WSDL não está acessível."""
+        return cls(
+            wsdl=f"{url}?wsdl",
+            endpoint=url,
+            soap_action=f"{NS_SERVICO_PADRAO}consultarProcesso",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "wsdl": self.wsdl,
+            "endpoint": self.endpoint,
+            "namespace": self.ns_servico,
+            "namespaceTipos": self.ns_tipos,
+            "soapAction": self.soap_action,
+            "operacoes": self.operacoes,
+        }
+
+
+def analisar_wsdl(conteudo: bytes, url: str) -> ServicoMNI:
+    """Extrai do WSDL o endereço real do serviço, os namespaces e o SOAPAction.
+
+    O endereço importa: o TJCE, por exemplo, publica o WSDL em `pje.tjce.jus.br`
+    mas atende as chamadas em `pjews.tjce.jus.br`.
+    """
+    raiz = ET.fromstring(conteudo)
+    servico = ServicoMNI.presumido(url)
+    servico.wsdl = f"{url}?wsdl"
+    servico.ns_servico = raiz.get("targetNamespace") or NS_SERVICO_PADRAO
+
+    for schema in raiz.iter(f"{{{NS_XSD}}}schema"):
+        alvo = schema.get("targetNamespace")
+        if alvo and any(c.get("name") == "tipoConsultarProcesso" for c in schema):
+            servico.ns_tipos = alvo
+            break
+
+    for endereco in raiz.iter(f"{{{NS_WSDL_SOAP}}}address"):
+        if endereco.get("location"):
+            servico.endpoint = endereco.get("location", url)
+            break
+
+    servico.soap_action = f"{servico.ns_servico}consultarProcesso"
+    for binding in raiz.iter(f"{{{NS_WSDL}}}binding"):
+        for operacao in binding:
+            nome = operacao.get("name") or ""
+            if _local(operacao.tag) != "operation" or not nome:
+                continue
+            if nome not in servico.operacoes:
+                servico.operacoes.append(nome)
+            if nome != "consultarProcesso":
+                continue
+            for filho in operacao:
+                if _local(filho.tag) == "operation" and filho.get("soapAction"):
+                    servico.soap_action = filho.get("soapAction", "")
+    return servico
+
+
 # ─── Cliente ──────────────────────────────────────────────────
 @dataclass
 class MNIClient:
@@ -252,7 +381,7 @@ class MNIClient:
     timeout: float = DEFAULT_TIMEOUT
     namespace: str = NS_SERVICO_PADRAO
     verify_ssl: bool = True
-    _ns_cache: dict[str, str] = field(default_factory=dict, repr=False)
+    _servicos: dict[str, ServicoMNI] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self.cpf = re.sub(r"\D", "", self.cpf or "")
@@ -272,60 +401,83 @@ class MNIClient:
         incluir_cabecalho: bool,
         incluir_documentos: bool,
         documentos: Optional[list[str]],
-        namespace: str,
+        servico: ServicoMNI,
     ) -> str:
+        """Monta o envelope com os parâmetros qualificados no namespace de tipos."""
         docs = "".join(
-            f"<documento>{escape(str(d))}</documento>" for d in (documentos or [])
+            f"<tip:documento>{escape(str(d))}</tip:documento>"
+            for d in (documentos or [])
         )
         return (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            f'<soapenv:Envelope xmlns:soapenv="{NS_SOAP}" xmlns:ser="{namespace}">'
+            f'<soapenv:Envelope xmlns:soapenv="{NS_SOAP}"'
+            f' xmlns:ser="{servico.ns_servico}" xmlns:tip="{servico.ns_tipos}">'
             "<soapenv:Header/><soapenv:Body>"
             "<ser:consultarProcesso>"
-            f"<idConsultante>{escape(self.cpf)}</idConsultante>"
-            f"<senhaConsultante>{escape(self.senha)}</senhaConsultante>"
-            f"<numeroProcesso>{escape(numero)}</numeroProcesso>"
-            f"<movimentos>{str(movimentos).lower()}</movimentos>"
-            f"<incluirCabecalho>{str(incluir_cabecalho).lower()}</incluirCabecalho>"
-            f"<incluirDocumentos>{str(incluir_documentos).lower()}</incluirDocumentos>"
+            f"<tip:idConsultante>{escape(self.cpf)}</tip:idConsultante>"
+            f"<tip:senhaConsultante>{escape(self.senha)}</tip:senhaConsultante>"
+            f"<tip:numeroProcesso>{escape(numero)}</tip:numeroProcesso>"
+            f"<tip:movimentos>{str(movimentos).lower()}</tip:movimentos>"
+            f"<tip:incluirCabecalho>{str(incluir_cabecalho).lower()}</tip:incluirCabecalho>"
+            f"<tip:incluirDocumentos>{str(incluir_documentos).lower()}</tip:incluirDocumentos>"
             f"{docs}"
             "</ser:consultarProcesso>"
             "</soapenv:Body></soapenv:Envelope>"
         )
 
-    async def _descobrir_namespace(self, client: httpx.AsyncClient, url: str) -> str:
-        """Lê o targetNamespace do WSDL para acertar a versão do MNI do tribunal."""
-        if url in self._ns_cache:
-            return self._ns_cache[url]
-        ns = self.namespace
+    async def _descobrir_servico(self, url: str) -> ServicoMNI:
+        """Lê o WSDL do tribunal (uma vez por URL) para saber como chamá-lo."""
+        if url in self._servicos:
+            return self._servicos[url]
+        servico = ServicoMNI.presumido(url)
         try:
-            resp = await client.get(f"{url}?wsdl")
-            if resp.is_success:
-                alvo = ET.fromstring(resp.content).get("targetNamespace")
-                if alvo:
-                    ns = alvo
+            async with httpx.AsyncClient(
+                timeout=min(self.timeout, 30.0),
+                verify=self.verify_ssl,
+                follow_redirects=True,
+            ) as client:
+                resp = await _get_com_retry(client, f"{url}?wsdl")
+            if resp.is_success and b"definitions" in resp.content[:4000]:
+                servico = analisar_wsdl(resp.content, url)
         except (httpx.HTTPError, ET.ParseError):
-            pass  # tribunal sem WSDL público: segue com o namespace padrão
-        self._ns_cache[url] = ns
-        return ns
+            pass  # tribunal sem WSDL público: segue com o contrato padrão
+        self._servicos[url] = servico
+        return servico
 
-    async def _post(self, url: str, corpo: str) -> tuple[bytes, str]:
+    async def _post(self, servico: ServicoMNI, url: str, corpo: str) -> tuple[bytes, str]:
         headers = {
-            "Content-Type": 'text/xml;charset=UTF-8',
-            "SOAPAction": '""',
+            "Content-Type": "text/xml;charset=UTF-8",
+            "SOAPAction": f'"{servico.soap_action}"',
             "Accept": "text/xml, multipart/related, application/xop+xml",
         }
+        # O endereço do WSDL vem primeiro; se ele não atender (endereço interno
+        # publicado por engano), tenta a própria URL de onde o WSDL foi lido.
+        destinos = [servico.endpoint] + ([url] if url != servico.endpoint else [])
+        erro: Optional[Exception] = None
+        resp = None
         async with httpx.AsyncClient(
             timeout=self.timeout, verify=self.verify_ssl, follow_redirects=True
         ) as client:
-            try:
-                resp = await client.post(url, content=corpo.encode("utf-8"), headers=headers)
-            except httpx.HTTPError as exc:
-                raise MNIError(
-                    f"Não foi possível alcançar o MNI em {url}.",
-                    status=504,
-                    detalhe=str(exc),
-                ) from exc
+            for destino in destinos:
+                for _ in range(2):
+                    try:
+                        resp = await client.post(
+                            destino, content=corpo.encode("utf-8"), headers=headers
+                        )
+                        break
+                    except httpx.TransportError as exc:
+                        erro = exc
+                    except httpx.HTTPError as exc:
+                        erro = exc
+                        break
+                if resp is not None:
+                    break
+        if resp is None:
+            raise MNIError(
+                f"Não foi possível alcançar o MNI em {' nem '.join(destinos)}.",
+                status=504,
+                detalhe=str(erro),
+            ) from erro
         if resp.status_code >= 500 and b"Fault" not in resp.content:
             raise MNIError(
                 f"O MNI do tribunal respondeu HTTP {resp.status_code}.",
@@ -340,13 +492,10 @@ class MNIClient:
             )
         return resp.content, resp.headers.get("content-type", "")
 
-    async def _chamar(self, url: str, **kwargs: Any) -> ET.Element:
-        async with httpx.AsyncClient(
-            timeout=self.timeout, verify=self.verify_ssl, follow_redirects=True
-        ) as client:
-            ns = await self._descobrir_namespace(client, url)
-        corpo = self._envelope(namespace=ns, **kwargs)
-        bruto, content_type = await self._post(url, corpo)
+    async def _chamar(self, url: str, **kwargs: Any) -> tuple[ET.Element, ServicoMNI]:
+        servico = await self._descobrir_servico(url)
+        corpo = self._envelope(servico=servico, **kwargs)
+        bruto, content_type = await self._post(servico, url, corpo)
         xml, anexos = _separar_mtom(bruto, content_type)
         try:
             raiz = ET.fromstring(xml)
@@ -358,7 +507,7 @@ class MNIClient:
             ) from exc
         _levantar_se_fault(raiz)
         _resolver_xop(raiz, anexos)
-        return raiz
+        return raiz, servico
 
     # ── Operações ───────────────────────────────────────────
     async def consultar_processo(
@@ -378,7 +527,7 @@ class MNIClient:
         erro: Optional[MNIError] = None
         for url in urls:
             try:
-                raiz = await self._chamar(
+                raiz, servico = await self._chamar(
                     url,
                     numero=num.digitos,
                     movimentos=movimentos,
@@ -391,7 +540,7 @@ class MNIClient:
                 if exc.status in (404, 504):
                     continue  # candidato errado: tenta o próximo caminho
                 raise
-            return _parsear_resposta(raiz, num, url)
+            return _parsear_resposta(raiz, num, servico.endpoint)
 
         raise erro or MNIError("Nenhum endpoint MNI candidato respondeu.", status=502)
 
@@ -499,18 +648,16 @@ async def verificar_endpoints(
         timeout=min(timeout, 30.0), verify=verify_ssl, follow_redirects=True
     ) as client:
         for url in candidatos_endpoint(num, grau):
-            item: dict[str, Any] = {"endpoint": url}
+            item: dict[str, Any] = {"wsdl": f"{url}?wsdl"}
             try:
-                resp = await client.get(f"{url}?wsdl")
+                resp = await _get_com_retry(client, f"{url}?wsdl")
                 item["status"] = resp.status_code
-                item["wsdl"] = resp.is_success and b"definitions" in resp.content
-                if item["wsdl"]:
-                    item["namespace"] = ET.fromstring(resp.content).get(
-                        "targetNamespace", ""
-                    )
+                item["ok"] = resp.is_success and b"definitions" in resp.content[:4000]
+                if item["ok"]:
+                    item["servico"] = analisar_wsdl(resp.content, url).to_dict()
             except (httpx.HTTPError, ET.ParseError) as exc:
                 item["status"] = None
-                item["wsdl"] = False
+                item["ok"] = False
                 item["erro"] = str(exc)[:200]
             resultados.append(item)
     return {"processo": num.to_dict(), "candidatos": resultados}
@@ -575,12 +722,14 @@ def _levantar_se_fault(raiz: ET.Element) -> None:
 def _parsear_resposta(raiz: ET.Element, num: NumeroCNJ, endpoint: str) -> dict[str, Any]:
     resposta = _busca(raiz, "consultarProcessoResposta") or raiz
     mensagem = _attr(resposta, "mensagem")
+    sucesso = _attr(resposta, "sucesso").strip().lower() == "true"
 
     processo_el = _busca(resposta, "processo")
     if processo_el is None:
+        # O MNI recusa por `sucesso=false` + mensagem, sem SOAP Fault.
         raise MNIError(
             mensagem or "O MNI não devolveu dados do processo.",
-            status=404 if not mensagem else 502,
+            status=_status_da_mensagem(mensagem) if not sucesso else 502,
             detalhe=f"endpoint={endpoint}",
         )
 
@@ -612,6 +761,19 @@ def _parsear_resposta(raiz: ET.Element, num: NumeroCNJ, endpoint: str) -> dict[s
             "documentos": _parsear_documentos(processo_el),
         },
     }
+
+
+def _status_da_mensagem(mensagem: str) -> int:
+    """Traduz a mensagem de recusa do tribunal em status HTTP."""
+    if re.search(
+        r"senha|usu.rio|credencia|autentic|autoriz|permiss|login", mensagem, re.I
+    ):
+        return 401
+    if re.search(r"sigilo|segredo", mensagem, re.I):
+        return 403
+    if re.search(r"n.o (foi )?encontrad|inexistent|n.o localizad", mensagem, re.I):
+        return 404
+    return 502
 
 
 def _parsear_assuntos(basicos: Optional[ET.Element]) -> list[dict[str, Any]]:

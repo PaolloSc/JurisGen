@@ -34,11 +34,34 @@ PJE_MNI_TIMEOUT=120
 ```
 
 Cada tribunal publica o MNI em um caminho próprio e **não existe lista oficial
-consolidada**. Sem `PJE_MNI_ENDPOINTS` o cliente tenta, em ordem,
-`pje{grau}grau/intercomunicacao`, `pje{grau}g/intercomunicacao` e
-`pje/intercomunicacao` sob `https://pje.{sigla}.jus.br/` — bom para descobrir,
-ruim para produção. Descubra uma vez com `/api/v1/pje/diagnostico/{numero}`,
+consolidada**. Sem `PJE_MNI_ENDPOINTS` o cliente tenta, em ordem: as URLs já
+verificadas (tabela abaixo), depois `pje{grau}grau/intercomunicacao`,
+`pje{grau}g/intercomunicacao` e `pje/intercomunicacao` sob
+`https://pje.{sigla}.jus.br/`. Descubra com `/api/v1/pje/diagnostico/{numero}`,
 confirme com o tribunal e fixe o endereço no `.env`.
+
+### Endpoints verificados
+
+Varredura de 57 tribunais (27 TJs, 6 TRFs, 24 TRTs) em 05/09/2026: **6
+responderam** com WSDL válido nesses caminhos. Os demais usam outro caminho, não
+expõem o MNI publicamente ou estavam fora do ar — o segundo artigo do TecJustiça
+sobre o assunto faz a mesma ressalva.
+
+| Tribunal | WSDL | Endereço real de chamada (`soap:address`) |
+|---|---|---|
+| TJCE 1º | `pje.tjce.jus.br/pje1grau/intercomunicacao` | `pjews.tjce.jus.br/pje1grau/intercomunicacao` |
+| TJCE 2º | `pje.tjce.jus.br/pje2grau/intercomunicacao` | `pjews.tjce.jus.br/pje2grau/intercomunicacao` |
+| TJPE 1º | `pje.tjpe.jus.br/pje/intercomunicacao` | `pje.cloud.tjpe.jus.br/1g/intercomunicacao` |
+| TJPE 2º | `pje.tjpe.jus.br/pje2g/intercomunicacao` | `pje.cloud.tjpe.jus.br/2g/intercomunicacao` |
+| TRF5 | `pje.trf5.jus.br/pje/intercomunicacao` | `pje.trf5.jus.br/pjemni/intercomunicacao` |
+| TJMT | `pje.tjmt.jus.br/pje/intercomunicacao` | mesmo endereço |
+| TJPA | `pje.tjpa.jus.br/pje/intercomunicacao` | mesmo endereço |
+| TJRR | `pje.tjrr.jus.br/pje/intercomunicacao` | mesmo endereço |
+
+**Repare na terceira coluna.** Em metade dos casos o serviço atende em host ou
+caminho diferente daquele onde o WSDL está publicado. Por isso o cliente lê o
+`<soap:address>` do WSDL e chama o endereço que está lá — mandar a requisição
+para a URL do WSDL simplesmente não funciona no TJCE, no TJPE nem no TRF5.
 
 Credenciais: são o **login do próprio advogado no PJe**. Alguns tribunais exigem
 cadastro prévio do sistema consumidor ou certificado digital — pergunte à
@@ -124,12 +147,56 @@ O corpo de erro segue sempre a mesma forma:
 devolvem timeout ou resposta vazia. O `/diagnostico` separa "não achei o
 endereço" de "o tribunal não respondeu".
 
+## Validado contra tribunal real
+
+Verificado em 05/09/2026 contra o MNI de produção do **TJCE**
+(`pje1grau/intercomunicacao`), sem credencial válida:
+
+1. **Descoberta** — o WSDL devolve namespace 2.2.2, `soap:address` em
+   `pjews.tjce.jus.br`, SOAPAction
+   `http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso` e as
+   6 operações do MNI (`consultarProcesso`, `consultarAvisosPendentes`,
+   `consultarTeorComunicacao`, `entregarManifestacaoProcessual`,
+   `consultarAlteracao`, `confirmarRecebimento`).
+2. **Envelope aceito** — com CPF `00000000000` e senha inválida, o tribunal
+   responde `Erro ao realizar login via MNI. exception invoking: loginFailed`.
+   Ou seja: o XML foi desserializado e a chamada chegou à autenticação. Com
+   credencial real, a consulta segue adiante.
+3. **Envelope sem os prefixos de namespace é rejeitado** — a mesma chamada com
+   os parâmetros sem prefixo devolve HTTP 500:
+   `Unmarshalling Error: elemento inesperado (uri:"", local:"idConsultante")`.
+
+O passo 3 é a razão de os parâmetros irem qualificados: o schema declara
+`form="qualified"` em `tipos-servico-intercomunicacao-2.2.2`, e o JAX-WS do
+tribunal recusa o que vier sem prefixo.
+
+Falta o único passo que exige credencial real: consultar um processo em que você
+atue. Use o CLI:
+
+```bash
+cd backend
+python pje_cli.py diagnostico 0020682-74.2019.8.06.0128          # sem credencial
+python pje_cli.py consultar   0020682-74.2019.8.06.0128 --cpf 12345678900
+python pje_cli.py documentos  0020682-74.2019.8.06.0128 --cpf 12345678900
+python pje_cli.py baixar      0020682-74.2019.8.06.0128 123456 --cpf 12345678900
+```
+
+A senha é pedida por `getpass` — não passe em argumento, que fica no histórico do
+shell e visível na lista de processos.
+
 ## Detalhes de implementação
 
-- **Namespace**: o cliente lê o `targetNamespace` do `?wsdl` do tribunal e usa
-  esse valor no envelope; se o WSDL não estiver acessível, cai no padrão MNI
-  2.2.2. O parsing ignora namespace (compara só o nome local), então serve para
-  2.2, 2.2.2 e 3.0.
+- **Contrato lido do WSDL**: namespace do serviço, namespace dos parâmetros,
+  SOAPAction e endereço de chamada saem do `?wsdl` do próprio tribunal (uma
+  leitura por URL, em cache). Sem WSDL acessível, cai no padrão MNI 2.2.2. O
+  parsing ignora namespace (compara só o nome local), então serve 2.2, 2.2.2 e 3.0.
+- **Parâmetros qualificados**: `idConsultante`, `senhaConsultante` etc. vão no
+  namespace `tipos-servico-intercomunicacao-2.2.2`, como o schema exige.
+- **Recusa sem SOAP Fault**: o MNI costuma responder HTTP 200 com
+  `sucesso=false` e uma mensagem; ela vira `MNIError` com o status certo
+  (`loginFailed` → 401, "não encontrado" → 404, "sigilo" → 403).
+- **Conexão derrubada**: o PJe reseta a primeira conexão de vez em quando; GET e
+  POST têm uma retentativa.
 - **MTOM/XOP**: quando o tribunal devolve `multipart/related`, as partes binárias
   são casadas com os `<xop:Include href="cid:...">` antes do parsing.
 - **Segurança**: a senha só aparece no envelope enviado ao tribunal — nunca é
@@ -141,8 +208,13 @@ endereço" de "o tribunal não respondeu".
 cd backend && python test_pje_mni.py
 ```
 
-Rodam offline: número CNJ, resolução de endpoint, parsing da resposta, SOAP
-Fault, MTOM/XOP e um teste ponta a ponta contra um MNI falso em `127.0.0.1`.
+São 8 testes offline: número CNJ, análise do WSDL, resolução de endpoint,
+parsing da resposta, SOAP Fault, MTOM/XOP, recusa por `sucesso=false` e um teste
+ponta a ponta contra um MNI falso em `127.0.0.1` — que serve WSDL com
+`soap:address` em outro caminho, para provar que o cliente segue o endereço
+anunciado e envia os parâmetros qualificados.
+
+Para testar contra tribunal real, use o `pje_cli.py` (seção acima).
 
 ## Sobre APIs REST de terceiros para o PJe
 

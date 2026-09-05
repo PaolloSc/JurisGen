@@ -171,6 +171,8 @@ Autenticação por header `X-MNI-CPF` / `X-MNI-SENHA`. Ver [backend/PJE_MNI.md](
 - `GET /api/v1/processo/{numero}/documento/{id}` — Download do documento
 - `GET /api/v1/pje/diagnostico/{numero}` — Descobre e testa o endpoint MNI do tribunal
 
+Linha de comando: `python backend/pje_cli.py diagnostico <numero>`
+
 ### CNJ DataJud
 - `POST /api/cnj/search` — Metadados públicos de processos (não traz documentos)
 

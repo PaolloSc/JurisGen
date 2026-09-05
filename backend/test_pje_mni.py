@@ -10,6 +10,7 @@ from xml.etree import ElementTree as ET
 
 from pje_mni import (
     MNIError,
+    analisar_wsdl,
     _levantar_se_fault,
     _parsear_resposta,
     _separar_mtom,
@@ -67,6 +68,70 @@ FAULT = """<?xml version="1.0"?>
  <soap:Fault><faultcode>soap:Server</faultcode>
   <faultstring>Senha invalida para o consultante informado</faultstring>
  </soap:Fault></soap:Body></soap:Envelope>"""
+
+
+# Recorte com a mesma forma do WSDL de produção do TJCE: parâmetros
+# form="qualified" em namespace próprio e <soap:address> em outro host.
+WSDL = """<?xml version='1.0' encoding='UTF-8'?>
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:tns="http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/"
+    targetNamespace="http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/">
+ <wsdl:types>
+  <xs:schema targetNamespace="http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2">
+   <xs:complexType name="tipoConsultarProcesso">
+    <xs:sequence>
+     <xs:element form="qualified" name="idConsultante" type="xs:string"/>
+     <xs:element form="qualified" name="senhaConsultante" type="xs:string"/>
+     <xs:element form="qualified" name="numeroProcesso" type="xs:string"/>
+    </xs:sequence>
+   </xs:complexType>
+  </xs:schema>
+  <xs:schema targetNamespace="http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/">
+   <xs:element name="consultarProcesso" type="ns2:tipoConsultarProcesso"
+               xmlns:ns2="http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2"/>
+  </xs:schema>
+ </wsdl:types>
+ <wsdl:binding name="ServicoIntercomunicacaoSoapBinding" type="tns:ServicoIntercomunicacao">
+  <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+  <wsdl:operation name="consultarProcesso">
+   <soap:operation soapAction="http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"/>
+  </wsdl:operation>
+  <wsdl:operation name="entregarManifestacaoProcessual">
+   <soap:operation soapAction="http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/entregarManifestacaoProcessual"/>
+  </wsdl:operation>
+ </wsdl:binding>
+ <wsdl:service name="ServicoIntercomunicacaoService">
+  <wsdl:port binding="tns:ServicoIntercomunicacaoSoapBinding" name="ServicoIntercomunicacaoPort">
+   <soap:address location="{address}"/>
+  </wsdl:port>
+ </wsdl:service>
+</wsdl:definitions>"""
+
+
+def test_analisar_wsdl():
+    servico = analisar_wsdl(
+        WSDL.format(address="https://pjews.tjce.jus.br/pje1grau/intercomunicacao").encode(),
+        "https://pje.tjce.jus.br/pje1grau/intercomunicacao",
+    )
+    assert servico.ns_servico == "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/"
+    assert servico.ns_tipos == "http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2"
+    assert servico.soap_action == (
+        "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"
+    )
+    # o endereço de chamada sai do WSDL, não da URL onde ele foi lido
+    assert servico.endpoint == "https://pjews.tjce.jus.br/pje1grau/intercomunicacao"
+    assert servico.wsdl == "https://pje.tjce.jus.br/pje1grau/intercomunicacao?wsdl"
+    assert "entregarManifestacaoProcessual" in servico.operacoes
+
+    # sem WSDL utilizável, cai no contrato padrão
+    from pje_mni import ServicoMNI
+
+    padrao = ServicoMNI.presumido("https://pje.x.jus.br/pje/intercomunicacao")
+    assert padrao.endpoint == "https://pje.x.jus.br/pje/intercomunicacao"
+    assert padrao.soap_action.endswith("consultarProcesso")
+    print("ok  analise do wsdl")
 
 
 def test_numero_cnj():
@@ -190,7 +255,7 @@ def test_mtom():
 
 
 def test_ponta_a_ponta():
-    """Sobe um MNI falso em localhost e exercita envelope + parsing + download."""
+    """MNI falso em localhost: descoberta pelo WSDL, envelope, parsing e download."""
     import asyncio
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -203,14 +268,23 @@ def test_ponta_a_ponta():
         def log_message(self, *a):  # silencia o log do servidor de teste
             pass
 
-        def do_GET(self):  # WSDL indisponível: exercita o fallback de namespace
-            self.send_response(404)
+        def do_GET(self):
+            assert self.path.endswith("?wsdl"), self.path
+            corpo = WSDL.format(
+                address=f"http://127.0.0.1:{self.server.server_port}/ws/intercomunicacao"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/xml;charset=UTF-8")
+            self.send_header("Content-Length", str(len(corpo)))
             self.end_headers()
+            self.wfile.write(corpo)
 
         def do_POST(self):
-            corpo = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-            recebido["envelope"] = corpo.decode()
+            recebido["caminho"] = self.path
             recebido["soapaction"] = self.headers.get("SOAPAction")
+            recebido["envelope"] = self.rfile.read(
+                int(self.headers.get("Content-Length", 0))
+            ).decode()
             resposta = RESPOSTA.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/xml;charset=UTF-8")
@@ -226,14 +300,21 @@ def test_ponta_a_ponta():
         cliente = MNIClient(cpf="123.456.789-00", senha="segredo", endpoint=endpoint, timeout=10)
         dados = asyncio.run(cliente.consultar_processo("0020682-74.2019.8.06.0128"))
         assert dados["processo"]["partes"]["ativo"][0]["nome"] == "Maria da Silva"
-        assert dados["endpoint"] == endpoint
+
+        # seguiu o <soap:address> do WSDL em vez da URL de leitura
+        assert recebido["caminho"] == "/ws/intercomunicacao", recebido["caminho"]
+        assert dados["endpoint"].endswith("/ws/intercomunicacao")
+        assert recebido["soapaction"] == (
+            '"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"'
+        )
 
         envelope = recebido["envelope"]
-        assert "<idConsultante>12345678900</idConsultante>" in envelope, envelope
-        assert "<senhaConsultante>segredo</senhaConsultante>" in envelope
-        assert "<numeroProcesso>00206827420198060128</numeroProcesso>" in envelope
-        assert "<movimentos>true</movimentos>" in envelope
-        assert "consultarProcesso" in envelope
+        assert 'xmlns:tip="http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2"' in envelope
+        assert "<tip:idConsultante>12345678900</tip:idConsultante>" in envelope, envelope
+        assert "<tip:senhaConsultante>segredo</tip:senhaConsultante>" in envelope
+        assert "<tip:numeroProcesso>00206827420198060128</tip:numeroProcesso>" in envelope
+        assert "<tip:movimentos>true</tip:movimentos>" in envelope
+        assert "<ser:consultarProcesso>" in envelope
 
         conteudo, mimetype, nome = asyncio.run(
             cliente.baixar_documento("0020682-74.2019.8.06.0128", "123456")
@@ -241,7 +322,7 @@ def test_ponta_a_ponta():
         assert conteudo == PDF_FALSO
         assert mimetype == "application/pdf"
         assert nome == "00206827420198060128-123456.pdf"
-        assert "<documento>123456</documento>" in recebido["envelope"]
+        assert "<tip:documento>123456</tip:documento>" in recebido["envelope"]
 
         ids = asyncio.run(cliente.listar_documentos("0020682-74.2019.8.06.0128"))
         assert ids["documentos"][0]["descricao"] == "Peticao Inicial"
@@ -254,14 +335,46 @@ def test_ponta_a_ponta():
     print("ok  ponta a ponta (MNI falso em localhost)")
 
 
+def test_recusa_sem_fault():
+    """O MNI recusa credencial com sucesso=false + mensagem, sem SOAP Fault."""
+    from pje_mni import _parsear_resposta
+
+    recusa = """<?xml version="1.0"?>
+    <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>
+     <ns2:consultarProcessoResposta xmlns:ns2="http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/">
+      <sucesso>false</sucesso>
+      <mensagem>Usuario ou senha invalidos</mensagem>
+     </ns2:consultarProcessoResposta></soap:Body></soap:Envelope>"""
+    try:
+        _parsear_resposta(ET.fromstring(recusa), parse_numero_cnj("00206827420198060128"), "x")
+    except MNIError as exc:
+        assert exc.status == 401, exc.status
+        assert "senha" in exc.mensagem.lower()
+    else:
+        raise AssertionError("sucesso=false deveria virar MNIError")
+
+    inexistente = recusa.replace(
+        "Usuario ou senha invalidos", "Processo nao encontrado na base de dados"
+    )
+    try:
+        _parsear_resposta(ET.fromstring(inexistente), parse_numero_cnj("00206827420198060128"), "x")
+    except MNIError as exc:
+        assert exc.status == 404, exc.status
+    else:
+        raise AssertionError("processo inexistente deveria virar MNIError")
+    print("ok  recusa sem soap fault")
+
+
 if __name__ == "__main__":
     falhas = 0
     for teste in (
         test_numero_cnj,
+        test_analisar_wsdl,
         test_endpoints,
         test_parsing,
         test_fault,
         test_mtom,
+        test_recusa_sem_fault,
         test_ponta_a_ponta,
     ):
         try:
