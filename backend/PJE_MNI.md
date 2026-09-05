@@ -60,8 +60,12 @@ sobre o assunto faz a mesma ressalva.
 
 Dois casos verificados que **não** funcionam:
 
-- **TJMG** responde `426 Upgrade Required` em qualquer caminho — há um filtro na
-  borda que barra cliente que não seja navegador. Não é questão de achar a URL.
+- **TJMG** filtra por `User-Agent`: sem um de navegador, devolve `426 Upgrade
+  Required` em qualquer caminho. Com UA de navegador o filtro sai da frente e
+  aparece a resposta real — `302` para
+  `www8.tjmg.jus.br/error/server_error.html` em todos os caminhos MNI testados,
+  ou seja, a rota não existe publicamente. (O cliente passou a mandar
+  `User-Agent` de navegador por causa disso; ajustável por `PJE_MNI_USER_AGENT`.)
 - **TRT3** não expõe `intercomunicacao` em nenhum caminho testado; o que
   responde é `pje-comum-api`, a API REST interna do PJe, com erro estruturado
   (`ARQ-013`) para rota desconhecida.
@@ -215,6 +219,11 @@ versionado de ninguém.
   (`loginFailed` → 401, "não encontrado" → 404, "sigilo" → 403).
 - **Conexão derrubada**: o PJe reseta a primeira conexão de vez em quando; GET e
   POST têm uma retentativa.
+- **User-Agent**: enviado como navegador, porque tribunal com filtro de borda
+  (TJMG) responde 426 a cliente sem UA. Configurável em `PJE_MNI_USER_AGENT`.
+- **CPF conferido localmente**: dígitos verificadores validados antes de chamar
+  o tribunal, para um typo não gastar tentativa de login (o PJe bloqueia a conta
+  após algumas falhas).
 - **MTOM/XOP**: quando o tribunal devolve `multipart/related`, as partes binárias
   são casadas com os `<xop:Include href="cid:...">` antes do parsing.
 - **Segurança**: a senha só aparece no envelope enviado ao tribunal — nunca é

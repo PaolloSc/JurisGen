@@ -42,6 +42,14 @@ NS_XSD = "http://www.w3.org/2001/XMLSchema"
 
 DEFAULT_TIMEOUT = float(os.getenv("PJE_MNI_TIMEOUT", "120"))
 
+# Alguns tribunais filtram na borda quem não parece navegador — o TJMG devolve
+# 426 Upgrade Required sem User-Agent e 302 com ele.
+USER_AGENT = os.getenv(
+    "PJE_MNI_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/128.0.0.0 Safari/537.36",
+)
+
 
 class MNIError(Exception):
     """Falha ao falar com o MNI do tribunal (rede, SOAP Fault ou sucesso=false)."""
@@ -455,6 +463,7 @@ class MNIClient:
                 timeout=min(self.timeout, 30.0),
                 verify=self.verify_ssl,
                 follow_redirects=True,
+                headers={"User-Agent": USER_AGENT},
             ) as client:
                 resp = await _get_com_retry(client, f"{url}?wsdl")
             if resp.is_success and b"definitions" in resp.content[:4000]:
@@ -469,6 +478,7 @@ class MNIClient:
             "Content-Type": "text/xml;charset=UTF-8",
             "SOAPAction": f'"{servico.soap_action}"',
             "Accept": "text/xml, multipart/related, application/xop+xml",
+            "User-Agent": USER_AGENT,
         }
         # O endereço do WSDL vem primeiro; se ele não atender (endereço interno
         # publicado por engano), tenta a própria URL de onde o WSDL foi lido.
@@ -665,7 +675,10 @@ async def verificar_endpoints(
     num = parse_numero_cnj(numero)
     resultados = []
     async with httpx.AsyncClient(
-        timeout=min(timeout, 30.0), verify=verify_ssl, follow_redirects=True
+        timeout=min(timeout, 30.0),
+        verify=verify_ssl,
+        follow_redirects=True,
+        headers={"User-Agent": USER_AGENT},
     ) as client:
         for url in candidatos_endpoint(num, grau):
             item: dict[str, Any] = {"wsdl": f"{url}?wsdl"}
