@@ -161,6 +161,19 @@ def parse_numero_cnj(numero: str) -> NumeroCNJ:
     )
 
 
+def cpf_valido(cpf: str) -> bool:
+    """Confere os dois dígitos verificadores do CPF."""
+    d = [int(c) for c in re.sub(r"\D", "", cpf or "")]
+    if len(d) != 11 or len(set(d)) == 1:
+        return False
+    for pos in (9, 10):
+        soma = sum(d[i] * (pos + 1 - i) for i in range(pos))
+        digito = 0 if soma % 11 < 2 else 11 - soma % 11
+        if digito != d[pos]:
+            return False
+    return True
+
+
 # ─── Resolução de endpoint ────────────────────────────────────
 # Cada tribunal publica o MNI em um caminho próprio e não existe lista oficial
 # consolidada — por isso o mapa abaixo traz apenas *candidatos* pelo padrão mais
@@ -390,6 +403,13 @@ class MNIClient:
                 "Credenciais do PJe ausentes: informe CPF e senha "
                 "(headers X-MNI-CPF / X-MNI-SENHA ou PJE_CPF / PJE_SENHA no .env).",
                 status=401,
+            )
+        # Pega o typo aqui em vez de gastar uma tentativa de login no tribunal —
+        # o PJe bloqueia a conta depois de algumas falhas seguidas.
+        if len(self.cpf) == 11 and not cpf_valido(self.cpf):
+            raise MNIError(
+                "CPF do consultante inválido: os dígitos verificadores não conferem.",
+                status=400,
             )
 
     # ── SOAP ────────────────────────────────────────────────

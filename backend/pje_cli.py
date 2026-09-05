@@ -17,7 +17,12 @@ import json
 import os
 import sys
 
+from dotenv import load_dotenv
+
 from pje_mni import MNIError, MNIClient, sem_conteudo, verificar_endpoints
+
+
+load_dotenv()  # lê PJE_CPF / PJE_SENHA do backend/.env, se existir
 
 
 def _mostrar(dados) -> None:

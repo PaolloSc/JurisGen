@@ -58,6 +58,16 @@ sobre o assunto faz a mesma ressalva.
 | TJPA | `pje.tjpa.jus.br/pje/intercomunicacao` | mesmo endereço |
 | TJRR | `pje.tjrr.jus.br/pje/intercomunicacao` | mesmo endereço |
 
+Dois casos verificados que **não** funcionam:
+
+- **TJMG** responde `426 Upgrade Required` em qualquer caminho — há um filtro na
+  borda que barra cliente que não seja navegador. Não é questão de achar a URL.
+- **TRT3** não expõe `intercomunicacao` em nenhum caminho testado; o que
+  responde é `pje-comum-api`, a API REST interna do PJe, com erro estruturado
+  (`ARQ-013`) para rota desconhecida.
+
+Em ambos, o caminho é pedir o endereço (e o credenciamento) à TI do tribunal.
+
 **Repare na terceira coluna.** Em metade dos casos o serviço atende em host ou
 caminho diferente daquele onde o WSDL está publicado. Por isso o cliente lê o
 `<soap:address>` do WSDL e chama o endereço que está lá — mandar a requisição
@@ -181,8 +191,16 @@ python pje_cli.py documentos  0020682-74.2019.8.06.0128 --cpf 12345678900
 python pje_cli.py baixar      0020682-74.2019.8.06.0128 123456 --cpf 12345678900
 ```
 
-A senha é pedida por `getpass` — não passe em argumento, que fica no histórico do
-shell e visível na lista de processos.
+O CPF pode ficar em `backend/.env` (`PJE_CPF=...`) — o arquivo está no
+`.gitignore`. A senha é pedida por `getpass`: não passe em argumento, que fica no
+histórico do shell e visível na lista de processos, e não a escreva no `.env`
+versionado de ninguém.
+
+> **Cuidado ao testar com CPF real.** O PJe bloqueia a conta após algumas
+> tentativas de login malsucedidas. Por isso o cliente confere os dígitos
+> verificadores do CPF antes de chamar o tribunal, e por isso os testes de
+> protocolo aqui usaram `00000000000` — um CPF inexistente, que não pertence a
+> ninguém e não tem conta para bloquear.
 
 ## Detalhes de implementação
 

@@ -11,6 +11,7 @@ from xml.etree import ElementTree as ET
 from pje_mni import (
     MNIError,
     analisar_wsdl,
+    cpf_valido,
     _levantar_se_fault,
     _parsear_resposta,
     _separar_mtom,
@@ -158,6 +159,35 @@ def test_numero_cnj():
     print("ok  numero CNJ")
 
 
+def test_cpf():
+    from pje_mni import MNIClient
+
+    assert cpf_valido("529.982.247-25")      # CPF de teste consagrado
+    assert cpf_valido("52998224725")
+    assert not cpf_valido("529.982.247-26")  # DV trocado
+    assert not cpf_valido("111.111.111-11")  # todos iguais
+    assert not cpf_valido("123")
+    assert not cpf_valido("")
+
+    MNIClient(cpf="529.982.247-25", senha="x")  # aceita com máscara
+    try:
+        MNIClient(cpf="52998224726", senha="x")
+    except MNIError as exc:
+        assert exc.status == 400, exc.status
+        assert "52998224726" not in str(exc), "não ecoar o CPF na mensagem"
+    else:
+        raise AssertionError("CPF com DV errado deveria falhar antes de ir ao tribunal")
+
+    try:
+        MNIClient(cpf="52998224725", senha="")
+    except MNIError as exc:
+        assert exc.status == 401
+    else:
+        raise AssertionError("senha vazia deveria falhar")
+    print("ok  validacao de cpf")
+
+
+
 def test_endpoints():
     num = parse_numero_cnj("0020682-74.2019.8.06.0128")
     candidatos = candidatos_endpoint(num, "1")
@@ -297,7 +327,7 @@ def test_ponta_a_ponta():
     endpoint = f"http://127.0.0.1:{servidor.server_port}/pje1grau/intercomunicacao"
 
     try:
-        cliente = MNIClient(cpf="123.456.789-00", senha="segredo", endpoint=endpoint, timeout=10)
+        cliente = MNIClient(cpf="529.982.247-25", senha="segredo", endpoint=endpoint, timeout=10)
         dados = asyncio.run(cliente.consultar_processo("0020682-74.2019.8.06.0128"))
         assert dados["processo"]["partes"]["ativo"][0]["nome"] == "Maria da Silva"
 
@@ -310,7 +340,7 @@ def test_ponta_a_ponta():
 
         envelope = recebido["envelope"]
         assert 'xmlns:tip="http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2"' in envelope
-        assert "<tip:idConsultante>12345678900</tip:idConsultante>" in envelope, envelope
+        assert "<tip:idConsultante>52998224725</tip:idConsultante>" in envelope, envelope
         assert "<tip:senhaConsultante>segredo</tip:senhaConsultante>" in envelope
         assert "<tip:numeroProcesso>00206827420198060128</tip:numeroProcesso>" in envelope
         assert "<tip:movimentos>true</tip:movimentos>" in envelope
@@ -370,6 +400,7 @@ if __name__ == "__main__":
     for teste in (
         test_numero_cnj,
         test_analisar_wsdl,
+        test_cpf,
         test_endpoints,
         test_parsing,
         test_fault,
