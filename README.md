@@ -160,6 +160,20 @@ docker compose up -d
 ### Chat
 - `POST /api/chat` — Mensagem livre (qualquer estágio)
 
+### PJe / MNI — leitura dos autos
+Acesso direto ao webservice MNI do tribunal (SOAP), sem intermediário.
+Autenticação por header `X-MNI-CPF` / `X-MNI-SENHA`. Ver [backend/PJE_MNI.md](backend/PJE_MNI.md).
+
+- `GET /api/v1/processo/{numero}` — Capa, partes, movimentos e documentos
+- `GET /api/v1/processo/{numero}/capa` — Só os metadados da capa
+- `GET /api/v1/processo/{numero}/documentos/ids` — IDs e descrições dos documentos
+- `GET /api/v1/processo/{numero}/peticao-inicial` — Inicial e anexos
+- `GET /api/v1/processo/{numero}/documento/{id}` — Download do documento
+- `GET /api/v1/pje/diagnostico/{numero}` — Descobre e testa o endpoint MNI do tribunal
+
+### CNJ DataJud
+- `POST /api/cnj/search` — Metadados públicos de processos (não traz documentos)
+
 ## Próximos passos para produção
 
 ### Obrigatórios
@@ -181,7 +195,8 @@ docker compose up -d
 ### Opcionais
 - [ ] Multi-tenancy (múltiplos escritórios)
 - [ ] Fine-tuning de prompts por área jurídica
-- [ ] Integração com PJe para peticionamento direto
+- [x] Integração com PJe para **leitura** dos autos via MNI (`backend/pje_mni.py`)
+- [ ] Integração com PJe para peticionamento direto (MNI `entregarManifestacaoProcessual`)
 - [ ] Versionamento de documentos gerados
 - [ ] Revisão colaborativa (WebSocket)
 

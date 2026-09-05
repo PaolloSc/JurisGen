@@ -10,7 +10,7 @@ from typing import Any, Optional
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -18,6 +18,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from llm.client import LLMClient, is_valid_legal_pt, sabia_client, orchestrator_client
+from pje_mni import (
+    MNIError,
+    cliente_de_credenciais,
+    sem_conteudo,
+    verificar_endpoints,
+)
 
 llm = LLMClient()
 
@@ -559,6 +565,147 @@ async def search_processo_cnj(request: CnjSearchRequest):
         return {"resultados": resultados}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== PJe / MNI (Modelo Nacional de Interoperabilidade) ==============
+# REST por cima do webservice SOAP do tribunal. As credenciais do PJe vão daqui
+# direto para o tribunal — nenhum intermediário no caminho.
+# Autenticação: headers X-MNI-CPF / X-MNI-SENHA (ou PJE_CPF / PJE_SENHA no .env).
+
+
+def _mni(
+    cpf: Optional[str], senha: Optional[str], endpoint: Optional[str]
+):
+    """Monta o cliente MNI, traduzindo falta de credencial em 401."""
+    try:
+        return cliente_de_credenciais(cpf, senha, endpoint)
+    except MNIError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.mensagem) from exc
+
+
+def _erro_mni(exc: MNIError) -> HTTPException:
+    sugestoes = {
+        400: "Use o número único CNJ com 20 dígitos (com ou sem máscara).",
+        401: "Confira CPF e senha do PJe (headers X-MNI-CPF / X-MNI-SENHA).",
+        403: "Documento sob sigilo ou fora do seu cadastro no processo.",
+        404: "Confirme o número do processo e o endpoint MNI do tribunal "
+        "(declare em PJE_MNI_ENDPOINTS).",
+        504: "O MNI do tribunal não respondeu no tempo esperado. Tente mais tarde.",
+    }
+    return HTTPException(
+        status_code=exc.status,
+        detail={
+            "sucesso": False,
+            "erro": exc.mensagem,
+            "detalhe": exc.detalhe,
+            "sugestao": sugestoes.get(exc.status, "Verifique o serviço MNI do tribunal."),
+        },
+    )
+
+
+@app.get("/api/v1/processo/{numero}")
+async def pje_consultar_processo(
+    numero: str,
+    grau: str = Query("1", pattern="^[12]$"),
+    movimentos: bool = True,
+    documentos: bool = False,
+    x_mni_cpf: Optional[str] = Header(None),
+    x_mni_senha: Optional[str] = Header(None),
+    x_mni_endpoint: Optional[str] = Header(None),
+):
+    """Dados completos do processo: capa, partes, movimentos e lista de documentos."""
+    cliente = _mni(x_mni_cpf, x_mni_senha, x_mni_endpoint)
+    try:
+        dados = await cliente.consultar_processo(
+            numero, movimentos=movimentos, incluir_documentos=documentos, grau=grau
+        )
+    except MNIError as exc:
+        raise _erro_mni(exc) from exc
+    return sem_conteudo(dados)
+
+
+@app.get("/api/v1/processo/{numero}/capa")
+async def pje_capa(
+    numero: str,
+    grau: str = Query("1", pattern="^[12]$"),
+    x_mni_cpf: Optional[str] = Header(None),
+    x_mni_senha: Optional[str] = Header(None),
+    x_mni_endpoint: Optional[str] = Header(None),
+):
+    """Só os metadados da capa — sem movimentos nem documentos."""
+    cliente = _mni(x_mni_cpf, x_mni_senha, x_mni_endpoint)
+    try:
+        return await cliente.capa(numero, grau=grau)
+    except MNIError as exc:
+        raise _erro_mni(exc) from exc
+
+
+@app.get("/api/v1/processo/{numero}/documentos/ids")
+async def pje_listar_documentos(
+    numero: str,
+    grau: str = Query("1", pattern="^[12]$"),
+    x_mni_cpf: Optional[str] = Header(None),
+    x_mni_senha: Optional[str] = Header(None),
+    x_mni_endpoint: Optional[str] = Header(None),
+):
+    """IDs e descrições dos documentos do processo."""
+    cliente = _mni(x_mni_cpf, x_mni_senha, x_mni_endpoint)
+    try:
+        return await cliente.listar_documentos(numero, grau=grau)
+    except MNIError as exc:
+        raise _erro_mni(exc) from exc
+
+
+@app.get("/api/v1/processo/{numero}/peticao-inicial")
+async def pje_peticao_inicial(
+    numero: str,
+    grau: str = Query("1", pattern="^[12]$"),
+    x_mni_cpf: Optional[str] = Header(None),
+    x_mni_senha: Optional[str] = Header(None),
+    x_mni_endpoint: Optional[str] = Header(None),
+):
+    """Petição inicial e seus anexos (metadados; use /documento/{id} para o PDF)."""
+    cliente = _mni(x_mni_cpf, x_mni_senha, x_mni_endpoint)
+    try:
+        return await cliente.peticao_inicial(numero, grau=grau)
+    except MNIError as exc:
+        raise _erro_mni(exc) from exc
+
+
+@app.get("/api/v1/processo/{numero}/documento/{id_doc}")
+async def pje_baixar_documento(
+    numero: str,
+    id_doc: str,
+    grau: str = Query("1", pattern="^[12]$"),
+    x_mni_cpf: Optional[str] = Header(None),
+    x_mni_senha: Optional[str] = Header(None),
+    x_mni_endpoint: Optional[str] = Header(None),
+):
+    """Download binário de um documento do processo."""
+    cliente = _mni(x_mni_cpf, x_mni_senha, x_mni_endpoint)
+    try:
+        conteudo, mimetype, nome = await cliente.baixar_documento(
+            numero, id_doc, grau=grau
+        )
+    except MNIError as exc:
+        raise _erro_mni(exc) from exc
+    return Response(
+        content=conteudo,
+        media_type=mimetype,
+        headers={"Content-Disposition": f'inline; filename="{nome}"'},
+    )
+
+
+@app.get("/api/v1/pje/diagnostico/{numero}")
+async def pje_diagnostico(
+    numero: str,
+    grau: str = Query("1", pattern="^[12]$"),
+):
+    """Decompõe o número CNJ e testa o WSDL de cada endpoint candidato (sem credencial)."""
+    try:
+        return await verificar_endpoints(numero, grau=grau)
+    except MNIError as exc:
+        raise _erro_mni(exc) from exc
 
 
 @app.get("/api/bibliotecas-sharepoint")
